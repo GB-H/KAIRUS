@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>KAIRUS</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="app">
+
+        <aside class="sidebar">
+
+            <div class="logo">
+                <div class="logo-icon">K</div>
+                <span class="logo-text">KAIRUS</span>
+            </div>
+
+            <button class="new-chat" id="newChat">
+                + Nova conversa
+            </button>
+
+            <div class="conversations-label">Conversas</div>
+
+            <div id="conversationList"></div>
+
+            <div class="sidebar-footer">
+                <button class="settings-btn" id="settingsBtn">
+                    &#9881; Configuracoes
+                </button>
+                <div class="version">KAIRUS v0.3.0</div>
+            </div>
+
+        </aside>
+
+        <main class="main">
+
+            <header class="header">
+                <span class="header-title">KAIRUS</span>
+                <div class="status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Sistema online</span>
+                </div>
+            </header>
+
+            <section id="messages">
+
+                <div class="welcome" id="welcomeScreen">
+
+                    <div class="welcome-logo">K</div>
+
+                    <h1>Como posso ajudar?</h1>
+
+                    <p>Converse com o KAIRUS.</p>
+
+                    <div class="suggestions" id="suggestions">
+                        <button class="suggestion" data-message="Quem e voce?">
+                            Quem e voce?
+                        </button>
+                        <button class="suggestion" data-message="O que voce sabe fazer?">
+                            O que voce sabe fazer?
+                        </button>
+                        <button class="suggestion" data-message="Conta uma piada">
+                            Conta uma piada
+                        </button>
+                        <button class="suggestion" data-message="Me explique buracos negros">
+                            Me explique buracos negros
+                        </button>
+                    </div>
+
+                </div>
+
+            </section>
+
+            <div class="input-area">
+
+                <form id="chatForm" class="chat-form">
+
+                    <textarea
+                        id="messageInput"
+                        placeholder="Envie uma mensagem para o KAIRUS..."
+                        rows="1"
+                    ></textarea>
+
+                    <button
+                        type="submit"
+                        id="sendButton"
+                        class="send-btn"
+                        aria-label="Enviar mensagem"
+                        disabled
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="19" x2="12" y2="5"></line>
+                            <polyline points="5 12 12 5 19 12"></polyline>
+                        </svg>
+                    </button>
+
+                </form>
+
+                <div class="disclaimer">
+                    KAIRUS pode cometer erros. Verifique informacoes importantes.
+                </div>
+
+            </div>
+
+        </main>
+
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
