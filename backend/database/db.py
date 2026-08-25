@@ -125,7 +125,7 @@ def get_user_by_id(user_id: int) -> dict | None:
 # CONVERSATIONS
 # =========================
 
-def create_conversation(conv_id: str, user_id: int, title: str = "Nova conversa") -> dict:
+def create_conversation(conv_id: str, user_id: int = 1, title: str = "Nova conversa") -> dict:
     """Cria uma nova conversa no banco."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -283,6 +283,7 @@ def save_user_info(conv_id: str, key: str, value: str):
 
 def get_user_info(conv_id: str) -> dict:
     """Retorna todas as informacoes do usuario de uma conversa."""
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(

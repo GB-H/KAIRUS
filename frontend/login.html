@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - KAIRUS</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: var(--bg-primary);
+            margin: 0;
+        }
+
+        .auth-container {
+            width: 100%;
+            max-width: 400px;
+            padding: 40px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .auth-logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .auth-logo img {
+            width: 64px;
+            height: 64px;
+            border-radius: 12px;
+            box-shadow: 0 0 40px var(--accent-glow);
+            margin-bottom: 16px;
+        }
+
+        .auth-logo h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .auth-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .auth-tab {
+            flex: 1;
+            padding: 12px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+        }
+
+        .auth-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .auth-tab:hover:not(.active) {
+            color: var(--text-primary);
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .auth-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+
+        .auth-btn:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .auth-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-logo">
+            <img src="logo.png" alt="KAIRUS">
+            <h1>KAIRUS</h1>
+        </div>
+
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">Entrar</button>
+            <button class="auth-tab" data-tab="register">Cadastrar</button>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+
+        <form class="auth-form active" id="loginForm">
+            <div class="form-group">
+                <label for="loginUsername">Username</label>
+                <input type="text" id="loginUsername" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword">Senha</label>
+                <input type="password" id="loginPassword" required minlength="6">
+            </div>
+            <button type="submit" class="auth-btn">Entrar</button>
+        </form>
+
+        <form class="auth-form" id="registerForm">
+            <div class="form-group">
+                <label for="registerUsername">Username</label>
+                <input type="text" id="registerUsername" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label for="registerPassword">Senha</label>
+                <input type="password" id="registerPassword" required minlength="6">
+            </div>
+            <div class="form-group">
+                <label for="registerPasswordConfirm">Confirmar Senha</label>
+                <input type="password" id="registerPasswordConfirm" required minlength="6">
+            </div>
+            <button type="submit" class="auth-btn">Cadastrar</button>
+        </form>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+
+        // Verifica se já está logado
+        if (localStorage.getItem("kairus_token")) {
+            window.location.href = "/";
+        }
+
+        // Tabs
+        const tabs = document.querySelectorAll(".auth-tab");
+        const forms = document.querySelectorAll(".auth-form");
+
+        tabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                tabs.forEach(t => t.classList.remove("active"));
+                forms.forEach(f => f.classList.remove("active"));
+
+                tab.classList.add("active");
+                document.getElementById(tab.dataset.tab + "Form").classList.add("active");
+                hideError();
+            });
+        });
+
+        function showError(message) {
+            const errorEl = document.getElementById("errorMessage");
+            errorEl.textContent = message;
+            errorEl.classList.add("show");
+        }
+
+        function hideError() {
+            document.getElementById("errorMessage").classList.remove("show");
+        }
+
+        // Login
+        document.getElementById("loginForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            hideError();
+
+            const username = document.getElementById("loginUsername").value;
+            const password = document.getElementById("loginPassword").value;
+
+            const btn = e.target.querySelector(".auth-btn");
+            btn.disabled = true;
+            btn.textContent = "Entrando...";
+
+            try {
+                const response = await fetch(`${API_URL}/api/auth/login`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "Erro ao fazer login");
+                }
+
+                localStorage.setItem("kairus_token", data.access_token);
+                localStorage.setItem("kairus_user_id", data.user_id);
+                localStorage.setItem("kairus_username", data.username);
+
+                window.location.href = "/";
+            } catch (error) {
+                showError(error.message);
+                btn.disabled = false;
+                btn.textContent = "Entrar";
+            }
+        });
+
+        // Register
+        document.getElementById("registerForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            hideError();
+
+            const username = document.getElementById("registerUsername").value;
+            const password = document.getElementById("registerPassword").value;
+            const passwordConfirm = document.getElementById("registerPasswordConfirm").value;
+
+            if (password !== passwordConfirm) {
+                showError("As senhas não coincidem");
+                return;
+            }
+
+            const btn = e.target.querySelector(".auth-btn");
+            btn.disabled = true;
+            btn.textContent = "Cadastrando...";
+
+            try {
+                const response = await fetch(`${API_URL}/api/auth/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "Erro ao cadastrar");
+                }
+
+                localStorage.setItem("kairus_token", data.access_token);
+                localStorage.setItem("kairus_user_id", data.user_id);
+                localStorage.setItem("kairus_username", data.username);
+
+                window.location.href = "/";
+            } catch (error) {
+                showError(error.message);
+                btn.disabled = false;
+                btn.textContent = "Cadastrar";
+            }
+        });
+    </script>
+</body>
+</html>

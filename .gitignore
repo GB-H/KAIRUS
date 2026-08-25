@@ -1,2 +1,46 @@
-# Environment
+# Ambiente virtual
+.venv/
+venv/
+env/
+ENV/
+
+# Cache e bytecode Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.so
+
+# Dados locais
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Configuracoes locais
 .env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
