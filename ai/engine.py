@@ -1,5 +1,5 @@
 """
-KAIRUS AI Engine — Orquestrador principal.
+KAIRUS AI Engine - Orquestrador principal.
 Modelo hibrido: regras para intencoes conhecidas + LLM para o resto.
 """
 
@@ -54,12 +54,16 @@ from ai.context import (
     get_conversation_stage,
 )
 from ai.tools import detect_tool, execute_tool
-from ai.llm import generate_llm_response, is_available, get_model_name
+from ai.llm import (
+    generate_llm_response,
+    stream_llm_response,
+    is_available,
+    get_model_name,
+)
 from ai.personality import NAME, VERSION
 import random
 
 
-# Intencoes que usam regras (rapido, gratis, previsivel)
 RULE_INTENTS = {
     INTENT_GREETING,
     INTENT_GOODBYE,
@@ -98,10 +102,6 @@ INTENT_RESPONSE_MAP = {
 
 
 def generate_response(message: str, session_id: str = "default") -> dict:
-    """
-    Processa a mensagem e retorna a resposta do KAIRUS.
-    Hibrido: regras para intencoes conhecidas, LLM para o resto.
-    """
     clean_message = message.strip()
     memory = get_memory(session_id)
 
@@ -121,10 +121,6 @@ def generate_response(message: str, session_id: str = "default") -> dict:
     tool_used = None
     used_llm = False
 
-    # =========================
-    # CAMINHO 1: FERRAMENTAS
-    # =========================
-
     if intent == INTENT_TOOL_USE:
         tool_name = detect_tool(clean_message)
         if tool_name:
@@ -132,42 +128,26 @@ def generate_response(message: str, session_id: str = "default") -> dict:
             result = execute_tool(tool_name, clean_message)
             response_text = result if result else pick(UNKNOWN)
 
-    # =========================
-    # CAMINHO 2: REGRAS (intencoes conhecidas)
-    # =========================
-
     elif intent in RULE_INTENTS:
         response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
-
-    # =========================
-    # CAMINHO 3: LLM (intencao desconhecida)
-    # =========================
 
     elif intent == INTENT_UNKNOWN and is_available():
         llm_response = generate_llm_response(
             message=clean_message,
             history=memory.messages,
         )
-
         if llm_response:
             response_text = llm_response
             used_llm = True
         else:
-            # Fallback se LLM falhar
             response_text = pick(UNKNOWN)
-
-    # =========================
-    # CAMINHO 4: FALLBACK (sem LLM)
-    # =========================
 
     else:
         response_text = pick(UNKNOWN)
 
-    # Registra na memoria
     memory.add_message("user", clean_message, intent)
     memory.add_message("assistant", response_text, intent)
 
-    # Determinar modelo usado
     if used_llm:
         model_name = f"{NAME}-llm-{VERSION}"
     else:
@@ -194,9 +174,85 @@ def generate_response(message: str, session_id: str = "default") -> dict:
     return result
 
 
-def _handle_rule_intent(intent: str, message: str, memory, is_repeat: bool) -> str:
-    """Processa intencoes conhecidas com regras."""
+def stream_response(message: str, session_id: str = "default"):
+    """Versao streaming do generate_response."""
+    clean_message = message.strip()
+    memory = get_memory(session_id)
 
+    if not clean_message:
+        text = "Voce nao enviou nenhuma mensagem."
+        yield {"type": "meta", "intent": "empty", "llm": False, "tool": None}
+        yield {"type": "token", "text": text}
+        yield {
+            "type": "done",
+            "response": text,
+            "intent": "empty",
+            "model": f"{NAME}-core-{VERSION}",
+            "llm": False,
+            "tool": None,
+        }
+        return
+
+    is_repeat = detect_repetition(clean_message, memory.messages)
+    intent = classify(clean_message)
+    memory.add_topic(intent)
+
+    tool_used = None
+    used_llm = False
+    full_text = ""
+
+    if intent == INTENT_TOOL_USE:
+        tool_name = detect_tool(clean_message)
+        if tool_name:
+            tool_used = tool_name
+            full_text = execute_tool(tool_name, clean_message) or pick(UNKNOWN)
+
+    elif intent in RULE_INTENTS:
+        full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
+
+    elif intent == INTENT_UNKNOWN and is_available():
+        used_llm = True
+
+    else:
+        full_text = pick(UNKNOWN)
+
+    yield {"type": "meta", "intent": intent, "llm": used_llm, "tool": tool_used}
+
+    if used_llm:
+        streamed = False
+        for token in stream_llm_response(clean_message, history=memory.messages):
+            streamed = True
+            full_text += token
+            yield {"type": "token", "text": token}
+
+        if not streamed:
+            text = generate_llm_response(clean_message, history=memory.messages)
+            if text:
+                full_text = text
+                yield {"type": "token", "text": text}
+            else:
+                used_llm = False
+                full_text = pick(UNKNOWN)
+                yield {"type": "token", "text": full_text}
+    else:
+        if not full_text:
+            full_text = pick(UNKNOWN)
+        yield {"type": "token", "text": full_text}
+
+    memory.add_message("user", clean_message, intent)
+    memory.add_message("assistant", full_text, intent)
+
+    yield {
+        "type": "done",
+        "response": full_text,
+        "intent": intent,
+        "model": f"{NAME}-llm-{VERSION}" if used_llm else f"{NAME}-core-{VERSION}",
+        "llm": used_llm,
+        "tool": tool_used,
+    }
+
+
+def _handle_rule_intent(intent: str, message: str, memory, is_repeat: bool) -> str:
     if intent == INTENT_NAME_TELL:
         name = extract_name(message)
         if name:

@@ -49,7 +49,6 @@ function showConfirmModal(title, message) {
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
 
-        // Animacao de entrada
         requestAnimationFrame(() => {
             overlay.classList.add("active");
             modal.classList.add("active");
@@ -72,22 +71,16 @@ function showConfirmModal(title, message) {
 
 
 /* =========================
-   ADICIONAR MENSAGEM
+   ADICIONAR MENSAGEM (estática)
 ========================= */
 
 function addMessage(role, text, meta) {
 
     const welcome = document.querySelector(".welcome");
-
-    if (welcome) {
-        welcome.remove();
-    }
+    if (welcome) welcome.remove();
 
     const message = document.createElement("div");
-
-    message.className = `message ${
-        role === "user" ? "user-message" : "ai-message"
-    }`;
+    message.className = `message ${role === "user" ? "user-message" : "ai-message"}`;
 
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
@@ -96,45 +89,127 @@ function addMessage(role, text, meta) {
     const contentWrapper = document.createElement("div");
     contentWrapper.className = "message-content-wrapper";
 
+    if (meta && (meta.llm || meta.tool)) {
+        const badgesDiv = document.createElement("div");
+        badgesDiv.className = "message-badges";
+        if (meta.llm) {
+            const badge = document.createElement("span");
+            badge.className = "llm-badge";
+            badge.textContent = "LLM";
+            badge.title = "Resposta gerada por inteligencia artificial";
+            badgesDiv.appendChild(badge);
+        }
+        if (meta.tool) {
+            const badge = document.createElement("span");
+            badge.className = "tool-badge";
+            badge.textContent = meta.tool;
+            badge.title = "Ferramenta utilizada";
+            badgesDiv.appendChild(badge);
+        }
+        contentWrapper.appendChild(badgesDiv);
+    }
+
     const content = document.createElement("div");
     content.className = "message-content";
     content.textContent = text;
-
     contentWrapper.appendChild(content);
-
-    if (meta && meta.llm) {
-        const badge = document.createElement("span");
-        badge.className = "llm-badge";
-        badge.textContent = "LLM";
-        badge.title = "Resposta gerada por inteligencia artificial";
-        contentWrapper.appendChild(badge);
-    }
-
-    if (meta && meta.tool) {
-        const badge = document.createElement("span");
-        badge.className = "tool-badge";
-        badge.textContent = meta.tool;
-        badge.title = "Ferramenta utilizada";
-        contentWrapper.appendChild(badge);
-    }
 
     message.appendChild(avatar);
     message.appendChild(contentWrapper);
 
     messages.appendChild(message);
-
     scrollToBottom();
 
-    return message;
+    return { message, content, contentWrapper };
 }
 
 
 /* =========================
-   INDICADOR DE DIGITACAO
+   MENSAGEM DE STREAMING
+========================= */
+
+function createStreamingMessage() {
+    const welcome = document.querySelector(".welcome");
+    if (welcome) welcome.remove();
+
+    const message = document.createElement("div");
+    message.className = "message ai-message";
+
+    const avatar = document.createElement("div");
+    avatar.className = "message-avatar";
+    avatar.textContent = "K";
+
+    const contentWrapper = document.createElement("div");
+    contentWrapper.className = "message-content-wrapper";
+
+    const badgesDiv = document.createElement("div");
+    badgesDiv.className = "message-badges";
+    badgesDiv.style.display = "none";
+    contentWrapper.appendChild(badgesDiv);
+
+    const content = document.createElement("div");
+    content.className = "message-content";
+    content.textContent = "";
+    contentWrapper.appendChild(content);
+
+    // Cursor de digitação no final
+    const cursor = document.createElement("span");
+    cursor.className = "stream-cursor";
+    content.appendChild(cursor);
+
+    message.appendChild(avatar);
+    message.appendChild(contentWrapper);
+    messages.appendChild(message);
+
+    scrollToBottom();
+
+    return {
+        message,
+        content,
+        contentWrapper,
+        badgesDiv,
+
+        appendToken(token) {
+            // Remove o cursor, adiciona o token, recoloca o cursor
+            const existingCursor = content.querySelector(".stream-cursor");
+            if (existingCursor) existingCursor.remove();
+            content.insertAdjacentText("beforeend", token);
+            content.appendChild(cursor);
+            scrollToBottom();
+        },
+
+        finish() {
+            const existingCursor = content.querySelector(".stream-cursor");
+            if (existingCursor) existingCursor.remove();
+        },
+
+        setBadges(meta) {
+            if (meta.llm) {
+                const badge = document.createElement("span");
+                badge.className = "llm-badge";
+                badge.textContent = "LLM";
+                badge.title = "Resposta gerada por inteligencia artificial";
+                badgesDiv.appendChild(badge);
+                badgesDiv.style.display = "block";
+            }
+            if (meta.tool) {
+                const badge = document.createElement("span");
+                badge.className = "tool-badge";
+                badge.textContent = meta.tool;
+                badge.title = "Ferramenta utilizada";
+                badgesDiv.appendChild(badge);
+                badgesDiv.style.display = "block";
+            }
+        }
+    };
+}
+
+
+/* =========================
+   INDICADOR DE DIGITACAO (antes do stream começar)
 ========================= */
 
 function showTyping() {
-
     const message = document.createElement("div");
     message.className = "message ai-message typing-message";
     message.id = "typingIndicator";
@@ -151,10 +226,8 @@ function showTyping() {
     dots.innerHTML = "<span></span><span></span><span></span>";
 
     content.appendChild(dots);
-
     message.appendChild(avatar);
     message.appendChild(content);
-
     messages.appendChild(message);
 
     scrollToBottom();
@@ -162,9 +235,7 @@ function showTyping() {
 
 function hideTyping() {
     const typing = document.getElementById("typingIndicator");
-    if (typing) {
-        typing.remove();
-    }
+    if (typing) typing.remove();
 }
 
 
@@ -177,41 +248,35 @@ function scrollToBottom() {
 
 
 /* =========================
-   ENVIAR MENSAGEM
+   ENVIAR MENSAGEM (com streaming)
 ========================= */
 
 chatForm.addEventListener("submit", async (event) => {
-
     event.preventDefault();
 
     const text = messageInput.value.trim();
-
-    if (!text || isWaiting) {
-        return;
-    }
+    if (!text || isWaiting) return;
 
     isWaiting = true;
     sendButton.disabled = true;
 
     addMessage("user", text);
 
-    conversationHistory.push({
-        role: "user",
-        content: text
-    });
+    conversationHistory.push({ role: "user", content: text });
 
     messageInput.value = "";
     messageInput.style.height = "auto";
 
     showTyping();
 
-    try {
+    let fullResponse = "";
+    let meta = { llm: false, tool: null };
+    let streamingMsg = null;
 
-        const response = await fetch(`${API_URL}/api/chat`, {
+    try {
+        const response = await fetch(`${API_URL}/api/chat/stream`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 message: text,
                 session_id: sessionId
@@ -219,46 +284,87 @@ chatForm.addEventListener("submit", async (event) => {
         });
 
         if (!response.ok) {
-            throw new Error("Erro na API");
+            throw new Error("Erro na API: " + response.status);
         }
 
-        const data = await response.json();
-
         hideTyping();
 
-        addMessage("assistant", data.response, {
-            llm: data.llm || false,
-            tool: data.tool || null,
-        });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        conversationHistory.push({
-            role: "assistant",
-            content: data.response
-        });
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        updateMemoryInfo(data.memory);
+            buffer += decoder.decode(value, { stream: true });
 
-        loadConversations();
+            // Divide por linhas (cada evento SSE é separado por \n\n)
+            const lines = buffer.split("\n");
+            buffer = lines.pop(); // última linha possivelmente incompleta
+
+            for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+
+                const payload = line.substring(6).trim();
+                if (payload === "[DONE]") continue;
+
+                try {
+                    const event = JSON.parse(payload);
+
+                    if (event.type === "meta") {
+                        meta = event;
+                        streamingMsg = createStreamingMessage();
+                    } else if (event.type === "token") {
+                        if (!streamingMsg) {
+                            streamingMsg = createStreamingMessage();
+                            if (meta.llm || meta.tool) {
+                                streamingMsg.setBadges(meta);
+                            }
+                        }
+                        streamingMsg.appendToken(event.text);
+                        fullResponse += event.text;
+                    } else if (event.type === "done") {
+                        // Metadados finais
+                        if (streamingMsg && (event.llm || event.tool)) {
+                            streamingMsg.setBadges(event);
+                        }
+                        if (streamingMsg) streamingMsg.finish();
+                        fullResponse = event.response || fullResponse;
+                    }
+                } catch (e) {
+                    // JSON inválido, ignora
+                }
+            }
+        }
+
+        conversationHistory.push({ role: "assistant", content: fullResponse });
+
+        // Recarrega conversas e atualiza memória
+        await loadConversations();
+        const memResp = await fetch(`${API_URL}/api/chat/memory?session_id=${sessionId}`);
+        if (memResp.ok) {
+            const memData = await memResp.json();
+            updateMemoryInfo({
+                message_count: memData.message_count,
+                user_name: memData.user_info?.name
+            });
+        }
 
     } catch (error) {
-
         console.error(error);
-
         hideTyping();
 
-        addMessage(
-            "assistant",
-            "Nao consegui me conectar ao servidor KAIRUS."
-        );
-
+        if (!streamingMsg) {
+            addMessage("assistant", "Nao consegui me conectar ao servidor KAIRUS.");
+        } else {
+            streamingMsg.finish();
+        }
     } finally {
-
         isWaiting = false;
         sendButton.disabled = !messageInput.value.trim();
         messageInput.focus();
-
     }
-
 });
 
 
@@ -271,7 +377,7 @@ function updateMemoryInfo(memoryData) {
 
     let versionEl = document.querySelector(".version");
     if (versionEl) {
-        let info = "KAIRUS v0.3.0";
+        let info = "KAIRUS v0.4.0";
         if (memoryData.message_count) {
             info += " | " + memoryData.message_count + " msgs";
         }
@@ -288,16 +394,13 @@ function updateMemoryInfo(memoryData) {
 ========================= */
 
 async function loadConversations() {
-
     try {
-
         const response = await fetch(`${API_URL}/api/conversations`);
         const data = await response.json();
 
         conversationList.innerHTML = "";
 
         data.conversations.forEach(conv => {
-
             const item = document.createElement("div");
             item.className = "conversation-item";
 
@@ -332,15 +435,12 @@ async function loadConversations() {
 
             item.appendChild(title);
             item.appendChild(deleteBtn);
-
             conversationList.appendChild(item);
-
         });
 
     } catch (e) {
         console.error("Erro ao carregar conversas:", e);
     }
-
 }
 
 
@@ -349,9 +449,7 @@ async function loadConversations() {
 ========================= */
 
 async function deleteConversation(convId) {
-
     try {
-
         const response = await fetch(`${API_URL}/api/conversations/${convId}`, {
             method: "DELETE"
         });
@@ -363,18 +461,13 @@ async function deleteConversation(convId) {
                 showWelcome();
 
                 let versionEl = document.querySelector(".version");
-                if (versionEl) {
-                    versionEl.textContent = "KAIRUS v0.3.0";
-                }
+                if (versionEl) versionEl.textContent = "KAIRUS v0.4.0";
             }
-
             loadConversations();
         }
-
     } catch (e) {
         console.error("Erro ao excluir conversa:", e);
     }
-
 }
 
 
@@ -383,15 +476,12 @@ async function deleteConversation(convId) {
 ========================= */
 
 async function loadConversation(convId) {
-
     try {
-
         const response = await fetch(`${API_URL}/api/conversations/${convId}/messages`);
         const data = await response.json();
 
         sessionId = convId;
         conversationHistory = [];
-
         messages.innerHTML = "";
 
         if (data.messages.length === 0) {
@@ -401,26 +491,20 @@ async function loadConversation(convId) {
 
         data.messages.forEach(msg => {
             addMessage(msg.role, msg.content);
-            conversationHistory.push({
-                role: msg.role,
-                content: msg.content
-            });
+            conversationHistory.push({ role: msg.role, content: msg.content });
         });
 
         let versionEl = document.querySelector(".version");
         if (versionEl) {
-            let info = "KAIRUS v0.3.0 | " + data.messages.length + " msgs";
-            versionEl.textContent = info;
+            versionEl.textContent = "KAIRUS v0.4.0 | " + data.messages.length + " msgs";
         }
 
         loadConversations();
-
         messageInput.focus();
 
     } catch (e) {
         console.error("Erro ao carregar conversa:", e);
     }
-
 }
 
 
@@ -431,37 +515,17 @@ async function loadConversation(convId) {
 function showWelcome() {
     messages.innerHTML = `
         <div class="welcome" id="welcomeScreen">
-
-            <div class="welcome-logo">
-                K
-            </div>
-
-            <h1>
-                Como posso ajudar?
-            </h1>
-
-            <p>
-                Converse com o KAIRUS.
-            </p>
-
+            <img src="logo.png" alt="KAIRUS" class="welcome-logo-img">
+            <h1>Como posso ajudar?</h1>
+            <p>Converse com o KAIRUS.</p>
             <div class="suggestions" id="suggestions">
-                <button class="suggestion" data-message="Quem e voce?">
-                    Quem e voce?
-                </button>
-                <button class="suggestion" data-message="O que voce sabe fazer?">
-                    O que voce sabe fazer?
-                </button>
-                <button class="suggestion" data-message="Conta uma piada">
-                    Conta uma piada
-                </button>
-                <button class="suggestion" data-message="Me explique buracos negros">
-                    Me explique buracos negros
-                </button>
+                <button class="suggestion" data-message="Quem e voce?">Quem e voce?</button>
+                <button class="suggestion" data-message="O que voce sabe fazer?">O que voce sabe fazer?</button>
+                <button class="suggestion" data-message="Conta uma piada">Conta uma piada</button>
+                <button class="suggestion" data-message="Me explique buracos negros">Me explique buracos negros</button>
             </div>
-
         </div>
     `;
-
     initSuggestions();
 }
 
@@ -471,14 +535,9 @@ function showWelcome() {
 ========================= */
 
 messageInput.addEventListener("input", () => {
-
     messageInput.style.height = "auto";
-
-    messageInput.style.height =
-        `${Math.min(messageInput.scrollHeight, 180)}px`;
-
+    messageInput.style.height = `${Math.min(messageInput.scrollHeight, 180)}px`;
     sendButton.disabled = !messageInput.value.trim() || isWaiting;
-
 });
 
 
@@ -487,15 +546,10 @@ messageInput.addEventListener("input", () => {
 ========================= */
 
 messageInput.addEventListener("keydown", (event) => {
-
     if (event.key === "Enter" && !event.shiftKey) {
-
         event.preventDefault();
-
         chatForm.requestSubmit();
-
     }
-
 });
 
 
@@ -504,7 +558,6 @@ messageInput.addEventListener("keydown", (event) => {
 ========================= */
 
 newChatButton.addEventListener("click", async () => {
-
     sessionId = generateSessionId();
     conversationHistory = [];
     isWaiting = false;
@@ -512,15 +565,11 @@ newChatButton.addEventListener("click", async () => {
     showWelcome();
 
     let versionEl = document.querySelector(".version");
-    if (versionEl) {
-        versionEl.textContent = "KAIRUS v0.3.0";
-    }
+    if (versionEl) versionEl.textContent = "KAIRUS v0.4.0";
 
     sendButton.disabled = true;
     messageInput.focus();
-
     loadConversations();
-
 });
 
 
@@ -529,24 +578,16 @@ newChatButton.addEventListener("click", async () => {
 ========================= */
 
 function initSuggestions() {
-
     const suggestions = document.querySelectorAll(".suggestion");
-
     suggestions.forEach(button => {
-
         button.addEventListener("click", () => {
-
             const message = button.getAttribute("data-message");
-
             if (message && !isWaiting) {
                 messageInput.value = message;
                 chatForm.requestSubmit();
             }
-
         });
-
     });
-
 }
 
 initSuggestions();
@@ -557,28 +598,21 @@ initSuggestions();
 ========================= */
 
 async function checkServerStatus() {
-
     const statusDot = document.querySelector(".status-dot");
     const statusText = document.querySelector(".status-text");
 
     try {
-
         const response = await fetch(`${API_URL}/api/health`);
-
         if (response.ok) {
             statusDot.classList.remove("offline");
             statusText.textContent = "Sistema online";
         } else {
             throw new Error();
         }
-
     } catch {
-
         statusDot.classList.add("offline");
         statusText.textContent = "Sistema offline";
-
     }
-
 }
 
 checkServerStatus();

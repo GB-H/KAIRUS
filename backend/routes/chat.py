@@ -1,7 +1,10 @@
+import json
+
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ai.engine import generate_response
+from ai.engine import generate_response, stream_response
 from ai.memory import clear_memory, get_memory
 from backend.database.db import (
     list_conversations,
@@ -33,7 +36,6 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    # Sanitizar input
     clean_message = sanitize_input(request.message)
 
     result = generate_response(clean_message, request.session_id)
@@ -44,6 +46,27 @@ async def chat(request: ChatRequest):
         model=result["model"],
         memory=result.get("memory", {}),
         tool=result.get("tool"),
+    )
+
+
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """Endpoint de streaming: resposta em tempo real via SSE."""
+    clean_message = sanitize_input(request.message)
+
+    def event_generator():
+        for event in stream_response(clean_message, request.session_id):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
