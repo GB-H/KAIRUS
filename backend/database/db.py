@@ -28,12 +28,23 @@ def init_db():
     cursor = conn.cursor()
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
             title TEXT DEFAULT 'Nova conversa',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            message_count INTEGER DEFAULT 0
+            message_count INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
@@ -64,23 +75,70 @@ def init_db():
 
 
 # =========================
+# USERS
+# =========================
+
+def create_user(username: str, password_hash: str) -> int | None:
+    """Cria um novo usuario. Retorna o ID ou None se ja existir."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (username, password_hash)
+        )
+        conn.commit()
+        user_id = cursor.lastrowid
+        return user_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+
+def get_user_by_username(username: str) -> dict | None:
+    """Retorna um usuario pelo username."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    conn.close()
+
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Retorna um usuario pelo ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    return dict(row) if row else None
+
+
+# =========================
 # CONVERSATIONS
 # =========================
 
-def create_conversation(conv_id: str, title: str = "Nova conversa") -> dict:
+def create_conversation(conv_id: str, user_id: int, title: str = "Nova conversa") -> dict:
     """Cria uma nova conversa no banco."""
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT OR IGNORE INTO conversations (id, title) VALUES (?, ?)",
-        (conv_id, title)
+        "INSERT OR IGNORE INTO conversations (id, user_id, title) VALUES (?, ?, ?)",
+        (conv_id, user_id, title)
     )
 
     conn.commit()
     conn.close()
 
-    return {"id": conv_id, "title": title}
+    return {"id": conv_id, "title": title, "user_id": user_id}
 
 
 def get_conversation(conv_id: str) -> dict | None:
@@ -98,14 +156,14 @@ def get_conversation(conv_id: str) -> dict | None:
     return None
 
 
-def list_conversations(limit: int = 20) -> list:
-    """Lista conversas recentes."""
+def list_conversations(user_id: int, limit: int = 20) -> list:
+    """Lista conversas recentes de um usuario."""
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?",
-        (limit,)
+        "SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
+        (user_id, limit)
     )
 
     rows = cursor.fetchall()
@@ -225,7 +283,6 @@ def save_user_info(conv_id: str, key: str, value: str):
 
 def get_user_info(conv_id: str) -> dict:
     """Retorna todas as informacoes do usuario de uma conversa."""
-    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(

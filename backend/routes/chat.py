@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -11,8 +11,10 @@ from backend.database.db import (
     get_messages,
     get_conversation,
     delete_conversation,
+    create_conversation,
 )
 from backend.middleware import sanitize_input
+from backend.auth import get_current_user
 
 
 router = APIRouter(
@@ -23,7 +25,7 @@ router = APIRouter(
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str = "default"
+    session_id: str
 
 
 class ChatResponse(BaseModel):
@@ -35,9 +37,23 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verifica se a conversa pertence ao usuario
+    conv = get_conversation(request.session_id)
+    if conv and conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
+    # Cria conversa se nao existir
+    if not conv:
+        create_conversation(request.session_id, current_user["user_id"])
+    
     clean_message = sanitize_input(request.message)
-
     result = generate_response(clean_message, request.session_id)
 
     return ChatResponse(
@@ -50,8 +66,21 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
     """Endpoint de streaming: resposta em tempo real via SSE."""
+    conv = get_conversation(request.session_id)
+    if conv and conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
+    if not conv:
+        create_conversation(request.session_id, current_user["user_id"])
+    
     clean_message = sanitize_input(request.message)
 
     def event_generator():
@@ -71,13 +100,33 @@ async def chat_stream(request: ChatRequest):
 
 
 @router.post("/chat/clear")
-async def clear_chat(session_id: str = "default"):
+async def clear_chat(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    conv = get_conversation(session_id)
+    if conv and conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
     clear_memory(session_id)
     return {"status": "ok", "message": "Memoria limpa."}
 
 
 @router.get("/chat/memory")
-async def get_chat_memory(session_id: str = "default"):
+async def get_chat_memory(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    conv = get_conversation(session_id)
+    if conv and conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
     memory = get_memory(session_id)
     return {
         "message_count": memory.message_count,
@@ -88,15 +137,34 @@ async def get_chat_memory(session_id: str = "default"):
 
 
 @router.get("/conversations")
-async def get_conversations(limit: int = 20):
-    convs = list_conversations(limit)
+async def get_conversations(
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user)
+):
+    convs = list_conversations(current_user["user_id"], limit)
     return {"conversations": convs}
 
 
 @router.get("/conversations/{conv_id}/messages")
-async def get_conversation_messages(conv_id: str, limit: int = 50):
-    msgs = get_messages(conv_id, limit)
+async def get_conversation_messages(
+    conv_id: str,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
     conv = get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversa nao encontrada"
+        )
+    
+    if conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
+    msgs = get_messages(conv_id, limit)
     return {
         "conversation": conv,
         "messages": msgs,
@@ -104,7 +172,23 @@ async def get_conversation_messages(conv_id: str, limit: int = 50):
 
 
 @router.delete("/conversations/{conv_id}")
-async def delete_conv(conv_id: str):
+async def delete_conv(
+    conv_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    conv = get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversa nao encontrada"
+        )
+    
+    if conv["user_id"] != current_user["user_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversa nao pertence a este usuario"
+        )
+    
     delete_conversation(conv_id)
     clear_memory(conv_id)
     return {"status": "ok", "message": "Conversa deletada."}

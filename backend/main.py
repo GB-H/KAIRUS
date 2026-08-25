@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from backend.routes.chat import router as chat_router
+from backend.routes.auth import router as auth_router
 from backend.database.db import init_db
 from backend.middleware import rate_limit_middleware
 
@@ -28,7 +29,7 @@ async def lifespan(app):
 app = FastAPI(
     title="KAIRUS API",
     description="Backend da plataforma de inteligencia artificial KAIRUS.",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -52,6 +53,7 @@ app.add_middleware(
 # ROTAS
 # =========================
 
+app.include_router(auth_router)
 app.include_router(chat_router)
 
 
@@ -60,11 +62,12 @@ async def status():
     from ai.llm import is_available, get_model_name
     return {
         "name": "KAIRUS",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "status": "online",
         "llm_available": is_available(),
         "llm_model": get_model_name() if is_available() else None,
         "features": [
+            "auth",
             "chat",
             "memory",
             "persistence",
