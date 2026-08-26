@@ -5,7 +5,6 @@ SQLite local (desenvolvimento) ou PostgreSQL (producao no Render).
 
 import sqlite3
 import os
-import dj_database_url
 from pathlib import Path
 
 try:
@@ -41,7 +40,12 @@ def get_connection():
 
 def _execute(conn, query, params=(), fetchone=False, fetchall=False, commit=True):
     """Executa uma query abstraindo Postgres vs SQLite."""
-    cursor = conn.cursor(cursor_factory=RealDictCursor if USE_POSTGRES else None)
+    # CRUCIAL: cursor_factory só funciona no PostgreSQL!
+    if USE_POSTGRES:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+    else:
+        cursor = conn.cursor()
+    
     cursor.execute(query, params)
     if commit:
         conn.commit()
