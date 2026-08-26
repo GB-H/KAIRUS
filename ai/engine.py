@@ -1,7 +1,11 @@
 """
 KAIRUS AI Engine - Orquestrador principal.
 Modelo hibrido: regras para intencoes conhecidas + LLM para o resto.
+v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
 """
+
+import os
+import random
 
 from ai.intents import classify
 from ai.intents import (
@@ -61,7 +65,7 @@ from ai.llm import (
     get_model_name,
 )
 from ai.personality import NAME, VERSION
-import random
+from ai.orchestrator import Orchestrator
 
 
 RULE_INTENTS = {
@@ -101,6 +105,51 @@ INTENT_RESPONSE_MAP = {
 }
 
 
+# =========================
+# MODO MULTI-AGENTE (FASE 1)
+# =========================
+
+def _orchestrator_enabled() -> bool:
+    """Flag de seguranca: modo multi-agente so liga se ativado explicitamente."""
+    return os.getenv("ORCHESTRATOR_ENABLED", "off").strip().lower() == "on"
+
+
+def _is_complex_task(task: str) -> bool:
+    """Heuristica rapida: so aciona a equipe de agentes se valer a pena."""
+    t = task.lower()
+    keywords = (
+        "planeje", "passo a passo", "analise", "escreva um texto",
+        "resuma", "pesquise", "explique detalhadamente", "compare",
+    )
+    return len(task) > 140 or any(k in t for k in keywords)
+
+
+def _llm_adapter(prompt: str, system: str, model=None) -> str:
+    """Adapta a chamada dos agentes para o llm.py existente (com failover)."""
+    return generate_llm_response(
+        message=system + "\n\n" + prompt,
+        history=[],
+    ) or ""
+
+
+def _run_orchestrator_safe(message: str):
+    """Roda a equipe de agentes. Se QUALQUER coisa falhar, retorna (None, [])
+    e o engine segue o fluxo normal. O KAIRUS nunca fica mudo."""
+    try:
+        orch = Orchestrator(llm_call=_llm_adapter)
+        result = orch.run(message)
+        if (
+            result
+            and result.success
+            and not result.fallback
+            and result.output.strip()
+        ):
+            return result.output, [s.agent for s in result.steps]
+    except Exception:
+        pass
+    return None, []
+
+
 def generate_response(message: str, session_id: str = "default") -> dict:
     clean_message = message.strip()
     memory = get_memory(session_id)
@@ -132,15 +181,23 @@ def generate_response(message: str, session_id: str = "default") -> dict:
         response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
 
     elif intent == INTENT_UNKNOWN and is_available():
-        llm_response = generate_llm_response(
-            message=clean_message,
-            history=memory.messages,
-        )
-        if llm_response:
-            response_text = llm_response
+        orch_output = None
+        if _orchestrator_enabled() and _is_complex_task(clean_message):
+            orch_output, _steps = _run_orchestrator_safe(clean_message)
+
+        if orch_output:
+            response_text = orch_output
             used_llm = True
         else:
-            response_text = pick(UNKNOWN)
+            llm_response = generate_llm_response(
+                message=clean_message,
+                history=memory.messages,
+            )
+            if llm_response:
+                response_text = llm_response
+                used_llm = True
+            else:
+                response_text = pick(UNKNOWN)
 
     else:
         response_text = pick(UNKNOWN)
@@ -181,7 +238,7 @@ def stream_response(message: str, session_id: str = "default"):
 
     if not clean_message:
         text = "Voce nao enviou nenhuma mensagem."
-        yield {"type": "meta", "intent": "empty", "llm": False, "tool": None}
+        yield {"type": "meta", "intent": "empty", "llm": False, "tool": None, "agents": []}
         yield {"type": "token", "text": text}
         yield {
             "type": "done",
@@ -190,6 +247,7 @@ def stream_response(message: str, session_id: str = "default"):
             "model": f"{NAME}-core-{VERSION}",
             "llm": False,
             "tool": None,
+            "agents": [],
         }
         return
 
@@ -200,6 +258,8 @@ def stream_response(message: str, session_id: str = "default"):
     tool_used = None
     used_llm = False
     full_text = ""
+    orchestrated = False
+    orch_steps = []
 
     if intent == INTENT_TOOL_USE:
         tool_name = detect_tool(clean_message)
@@ -211,14 +271,31 @@ def stream_response(message: str, session_id: str = "default"):
         full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
 
     elif intent == INTENT_UNKNOWN and is_available():
+        if _orchestrator_enabled() and _is_complex_task(clean_message):
+            orch_output, orch_steps = _run_orchestrator_safe(clean_message)
+            if orch_output:
+                orchestrated = True
+                full_text = orch_output
         used_llm = True
 
     else:
         full_text = pick(UNKNOWN)
 
-    yield {"type": "meta", "intent": intent, "llm": used_llm, "tool": tool_used}
+    yield {
+        "type": "meta",
+        "intent": intent,
+        "llm": used_llm,
+        "tool": tool_used,
+        "agents": orch_steps,
+    }
 
-    if used_llm:
+    if orchestrated:
+        # resposta da equipe de agentes, enviada em pedacos (efeito de digitar)
+        chunk = 4
+        for i in range(0, len(full_text), chunk):
+            yield {"type": "token", "text": full_text[i:i + chunk]}
+
+    elif used_llm:
         streamed = False
         for token in stream_llm_response(clean_message, history=memory.messages):
             streamed = True
@@ -249,6 +326,7 @@ def stream_response(message: str, session_id: str = "default"):
         "model": f"{NAME}-llm-{VERSION}" if used_llm else f"{NAME}-core-{VERSION}",
         "llm": used_llm,
         "tool": tool_used,
+        "agents": orch_steps,
     }
 
 
