@@ -40,22 +40,17 @@ def get_connection():
 
 def _execute(conn, query, params=(), fetchone=False, fetchall=False, commit=True):
     """Executa uma query abstraindo Postgres vs SQLite."""
-    # CRUCIAL: cursor_factory só funciona no PostgreSQL!
     if USE_POSTGRES:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
     else:
         cursor = conn.cursor()
-    
+
     cursor.execute(query, params)
     if commit:
         conn.commit()
     if fetchone:
         row = cursor.fetchone()
-        if USE_POSTGRES and row:
-            return dict(row)
-        elif row:
-            return dict(row)
-        return None
+        return dict(row) if row else None
     if fetchall:
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
@@ -66,53 +61,47 @@ def init_db():
     """Cria as tabelas se nao existirem."""
     conn = get_connection()
 
-    # PostgreSQL usa NOW(), SQLite usa CURRENT_TIMESTAMP
     timestamp = "NOW()" if USE_POSTGRES else "CURRENT_TIMESTAMP"
     id_type = "SERIAL" if USE_POSTGRES else "INTEGER"
-    text_type = "TEXT"
-    fk = "" if USE_POSTGRES else ""
 
-    queries = []
-
-    queries.append(f"""
-        CREATE TABLE {"IF NOT EXISTS " if not USE_POSTGRES else ""}users (
+    queries = [
+        f"""
+        CREATE TABLE IF NOT EXISTS users (
             id {id_type} PRIMARY KEY,
-            username {text_type} UNIQUE NOT NULL,
-            password_hash {text_type} NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT {timestamp}
         )
-    """)
-
-    queries.append(f"""
-        CREATE TABLE {"IF NOT EXISTS " if not USE_POSTGRES else ""}conversations (
-            id {text_type} PRIMARY KEY,
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
-            title {text_type} DEFAULT 'Nova conversa',
+            title TEXT DEFAULT 'Nova conversa',
             created_at TIMESTAMP DEFAULT {timestamp},
             updated_at TIMESTAMP DEFAULT {timestamp},
             message_count INTEGER DEFAULT 0
         )
-    """)
-
-    queries.append(f"""
-        CREATE TABLE {"IF NOT EXISTS " if not USE_POSTGRES else ""}messages (
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS messages (
             id {id_type} PRIMARY KEY,
-            conversation_id {text_type} NOT NULL,
-            role {text_type} NOT NULL,
-            content {text_type} NOT NULL,
-            intent {text_type} DEFAULT 'unknown',
+            conversation_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            intent TEXT DEFAULT 'unknown',
             created_at TIMESTAMP DEFAULT {timestamp}
         )
-    """)
-
-    queries.append(f"""
-        CREATE TABLE {"IF NOT EXISTS " if not USE_POSTGRES else ""}user_info (
-            conversation_id {text_type} NOT NULL,
-            key {text_type} NOT NULL,
-            value {text_type} NOT NULL,
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS user_info (
+            conversation_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
             PRIMARY KEY (conversation_id, key)
         )
-    """)
+        """,
+    ]
 
     for query in queries:
         conn.cursor().execute(query)
@@ -153,7 +142,6 @@ def create_user(username: str, password_hash: str) -> int | None:
 
 
 def get_user_by_username(username: str) -> dict | None:
-    """Retorna um usuario pelo username."""
     conn = get_connection()
     if USE_POSTGRES:
         row = _execute(conn, "SELECT * FROM users WHERE username = %s", (username,), fetchone=True)
@@ -181,7 +169,7 @@ def create_conversation(conv_id: str, user_id: int = 1, title: str = "Nova conve
     conn = get_connection()
     if USE_POSTGRES:
         _execute(conn,
-            "INSERT INTO conversations (id, user_id, title) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            "INSERT INTO conversations (id, user_id, title) VALUES (%s, %s, %s) ON CONFLICT (id) DO NOTHING",
             (conv_id, user_id, title))
     else:
         _execute(conn,
@@ -280,11 +268,11 @@ def get_messages(conv_id: str, limit: int = 50) -> list:
 def get_message_count(conv_id: str) -> int:
     conn = get_connection()
     if USE_POSTGRES:
-        row = _execute(conn, "SELECT COUNT(*) FROM messages WHERE conversation_id = %s", (conv_id,), fetchone=True)
+        row = _execute(conn, "SELECT COUNT(*) AS total FROM messages WHERE conversation_id = %s", (conv_id,), fetchone=True)
     else:
-        row = _execute(conn, "SELECT COUNT(*) FROM messages WHERE conversation_id = ?", (conv_id,), fetchone=True)
+        row = _execute(conn, "SELECT COUNT(*) AS total FROM messages WHERE conversation_id = ?", (conv_id,), fetchone=True)
     conn.close()
-    return row["COUNT(*)"] if row else 0
+    return row["total"] if row else 0
 
 
 # =========================
