@@ -1,4 +1,4 @@
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "";
 
 const messages = document.getElementById("messages");
 const chatForm = document.getElementById("chatForm");
@@ -331,7 +331,6 @@ chatForm.addEventListener("submit", async (event) => {
         });
 
         if (response.status === 401) {
-            // Token expirado ou invalido
             localStorage.removeItem("kairus_token");
             window.location.href = "/login.html";
             return;
@@ -396,6 +395,7 @@ chatForm.addEventListener("submit", async (event) => {
         });
 
         await loadConversations();
+
         const memResp = await fetch(`${API_URL}/api/chat/memory?session_id=${sessionId}`, {
             headers: { "Authorization": `Bearer ${getAuthToken()}` }
         });
@@ -767,12 +767,6 @@ setInterval(checkServerStatus, 30000);
 
 
 /* =========================
-   INICIALIZACAO
-========================= */
-
-loadConversations();
-messageInput.focus();
-/* =========================
    SIDEBAR COLAPSAVEL
 ========================= */
 
@@ -790,3 +784,11 @@ sidebarToggle.addEventListener("click", () => {
 if (localStorage.getItem("kairus_sidebar") === "collapsed") {
     appEl.classList.add("collapsed");
 }
+
+
+/* =========================
+   INICIALIZACAO
+========================= */
+
+loadConversations();
+messageInput.focus();

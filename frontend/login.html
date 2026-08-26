@@ -24,6 +24,7 @@
             border: 1px solid var(--border);
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            animation: fadeInUp 0.5s ease both;
         }
 
         .auth-logo {
@@ -44,6 +45,7 @@
             font-weight: 600;
             color: var(--text-primary);
             margin: 0;
+            letter-spacing: 2px;
         }
 
         .auth-tabs {
@@ -114,19 +116,20 @@
         .auth-btn {
             width: 100%;
             padding: 12px;
-            background: var(--accent);
+            background: linear-gradient(135deg, var(--accent), #a11c26);
             border: none;
             border-radius: 8px;
             color: white;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
             margin-top: 8px;
         }
 
         .auth-btn:hover:not(:disabled) {
-            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 22px rgba(224, 52, 63, 0.3);
         }
 
         .auth-btn:disabled {
@@ -166,7 +169,7 @@
 
         <form class="auth-form active" id="loginForm">
             <div class="form-group">
-                <label for="loginUsername">Username</label>
+                <label for="loginUsername">Usuario</label>
                 <input type="text" id="loginUsername" required minlength="3">
             </div>
             <div class="form-group">
@@ -178,7 +181,7 @@
 
         <form class="auth-form" id="registerForm">
             <div class="form-group">
-                <label for="registerUsername">Username</label>
+                <label for="registerUsername">Usuario</label>
                 <input type="text" id="registerUsername" required minlength="3">
             </div>
             <div class="form-group">
@@ -186,7 +189,7 @@
                 <input type="password" id="registerPassword" required minlength="6">
             </div>
             <div class="form-group">
-                <label for="registerPasswordConfirm">Confirmar Senha</label>
+                <label for="registerPasswordConfirm">Confirmar senha</label>
                 <input type="password" id="registerPasswordConfirm" required minlength="6">
             </div>
             <button type="submit" class="auth-btn">Cadastrar</button>
@@ -194,14 +197,14 @@
     </div>
 
     <script>
-        const API_URL = "http://127.0.0.1:8000";
+        const API_URL = "";
 
-        // Verifica se já está logado
+        // Se ja estiver logado, vai pro chat
         if (localStorage.getItem("kairus_token")) {
             window.location.href = "/";
         }
 
-        // Tabs
+        // Abas
         const tabs = document.querySelectorAll(".auth-tab");
         const forms = document.querySelectorAll(".auth-form");
 
@@ -263,7 +266,7 @@
             }
         });
 
-        // Register
+        // Cadastro
         document.getElementById("registerForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             hideError();
@@ -273,7 +276,7 @@
             const passwordConfirm = document.getElementById("registerPasswordConfirm").value;
 
             if (password !== passwordConfirm) {
-                showError("As senhas não coincidem");
+                showError("As senhas nao coincidem");
                 return;
             }
 
