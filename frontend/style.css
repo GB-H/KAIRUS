@@ -833,3 +833,13 @@ body {
         padding: 0 12px;
     }
 }
+@media (max-width: 768px) {
+    .sidebar {
+        animation: none;
+        transform: translateX(-100%);
+    }
+
+    .app.sidebar-open .sidebar {
+        transform: translateX(0);
+    }
+}
