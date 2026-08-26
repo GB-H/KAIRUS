@@ -792,3 +792,27 @@ if (localStorage.getItem("kairus_sidebar") === "collapsed") {
 
 loadConversations();
 messageInput.focus();
+/* =========================
+   MOBILE - MENU HAMBURGUER
+========================= */
+
+const menuToggle = document.getElementById("menuToggle");
+const sidebarOverlay = document.getElementById("sidebarOverlay");
+
+menuToggle.addEventListener("click", () => {
+    appEl.classList.toggle("sidebar-open");
+});
+
+sidebarOverlay.addEventListener("click", () => {
+    appEl.classList.remove("sidebar-open");
+});
+
+conversationList.addEventListener("click", (e) => {
+    if (e.target.closest(".conversation")) {
+        appEl.classList.remove("sidebar-open");
+    }
+});
+
+newChatButton.addEventListener("click", () => {
+    appEl.classList.remove("sidebar-open");
+});
