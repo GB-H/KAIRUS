@@ -1,16 +1,17 @@
 ﻿"""
-KAIRUS v0.6.0 - Orchestrator (FASE 1.5)
+KAIRUS v0.6.0 - Orchestrator (FASE 1.5 + FASE 2)
 
 Coordena os agentes especializados:
 
-Usuario -> Security -> Planner -> Agente -> Reviewer -> Resposta
+Usuario -> Security -> Planner -> Tools -> Agente -> Reviewer -> Resposta
 
 Regras:
 
 - Security pode bloquear entradas maliciosas
+- Tools so executam se o agente tiver permissao (allowed_tools)
+- Tool que falha nao trava o fluxo (segue sem ela)
 - Reviewer tem no maximo MAX_RETRIES tentativas
-- Se o agente falhar, retorna fallback=True
-- Se o Reviewer reprovar todas as tentativas, o resultado nao e considerado aprovado
+- Se o Reviewer reprovar todas as tentativas, fallback=True
 """
 
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from .agents import (
     ReviewerAgent,
     SecurityAgent,
 )
+from .tools import detect_tool, execute_tool
 
 MAX_RETRIES = 2
 
@@ -163,16 +165,46 @@ class Orchestrator:
         )
 
         # ==========================================
-        # 3. AGENTE ESPECIALIZADO
+        # 3. AGENTE + TOOLS (FASE 2)
         # ==========================================
 
         worker_name = self.classify(task)
-
         worker = self.registry.get(worker_name)
 
+        # ---- 3.1 Tool execution com permissao ----
+        tool_context = ""
+        tool_name = detect_tool(task)
+
+        if tool_name and tool_name in worker.allowed_tools:
+            tool_output = execute_tool(tool_name, task)
+
+            if tool_output:
+                tool_context = (
+                    "\nResultado da ferramenta "
+                    + tool_name
+                    + ": "
+                    + tool_output
+                )
+                steps.append(
+                    Step(
+                        "tool:" + tool_name,
+                        "ok",
+                        tool_output[:200],
+                    )
+                )
+            else:
+                # Tool falhou: segue sem ela, sem travar o fluxo
+                steps.append(
+                    Step(
+                        "tool:" + tool_name,
+                        "fail",
+                    )
+                )
+
+        # ---- 3.2 Agente executa com contexto da tool ----
         exec_result = worker.run(
             task,
-            context,
+            context + tool_context,
         )
 
         steps.append(
@@ -242,12 +274,10 @@ class Orchestrator:
                 )
             )
 
-            # Tenta melhorar a resposta utilizando
-            # o feedback do Reviewer.
-
             redo = worker.run(
                 task,
                 context
+                + tool_context
                 + "\nFeedback do reviewer: "
                 + rev.output,
             )
@@ -281,6 +311,13 @@ class Orchestrator:
         steps.append(
             Step(
                 "reviewer",
+                "max_retries_reached",
+                f"Limite de {MAX_RETRIES} tentativas atingido.",
+            )
+        )
+
+        steps.append(
+            Step(
                 "max_retries_reached",
                 f"Limite de {MAX_RETRIES} tentativas atingido.",
             )
