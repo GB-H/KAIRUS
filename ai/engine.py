@@ -2,6 +2,7 @@
 KAIRUS AI Engine - Orquestrador principal.
 Modelo hibrido: regras para intencoes conhecidas + LLM para o resto.
 v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
+FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
 """
 
 import os
@@ -134,7 +135,11 @@ def _llm_adapter(prompt: str, system: str, model=None) -> str:
 
 def _run_orchestrator_safe(message: str):
     """Roda a equipe de agentes. Se QUALQUER coisa falhar, retorna (None, [])
-    e o engine segue o fluxo normal. O KAIRUS nunca fica mudo."""
+    e o engine segue o fluxo normal. O KAIRUS nunca fica mudo.
+
+    Retorna: (output, steps_detalhados)
+    steps_detalhados: [{"agent": nome, "status": status}, ...]
+    """
     try:
         orch = Orchestrator(llm_call=_llm_adapter)
         result = orch.run(message)
@@ -144,7 +149,11 @@ def _run_orchestrator_safe(message: str):
             and not result.fallback
             and result.output.strip()
         ):
-            return result.output, [s.agent for s in result.steps]
+            steps = [
+                {"agent": s.agent, "status": s.status}
+                for s in result.steps
+            ]
+            return result.output, steps
     except Exception:
         pass
     return None, []
@@ -288,6 +297,10 @@ def stream_response(message: str, session_id: str = "default"):
         "tool": tool_used,
         "agents": orch_steps,
     }
+
+    # FASE 2.3: envia os steps do pipeline para o frontend
+    if orchestrated:
+        yield {"type": "agents", "steps": orch_steps}
 
     if orchestrated:
         # resposta da equipe de agentes, enviada em pedacos (efeito de digitar)

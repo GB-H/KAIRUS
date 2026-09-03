@@ -842,4 +842,45 @@ body {
     .app.sidebar-open .sidebar {
         transform: translateX(0);
     }
+}/* =========================
+   FASE 2.3 - PIPELINE VISUAL DE AGENTES
+========================= */
+
+.agent-pipeline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 4px 52px;
+}
+
+.agent-chip {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    color: #9ca3af;
+    animation: fadeInUp 0.3s ease both;
+}
+
+.agent-chip.status-ok {
+    border-color: rgba(220, 38, 38, 0.5);
+    color: #fca5a5;
+}
+
+.agent-chip.status-retry {
+    border-color: #b45309;
+    color: #fbbf24;
+}
+
+.agent-chip.status-fail,
+.agent-chip.status-block {
+    border-color: #7f1d1d;
+    color: #f87171;
+}
+
+@media (max-width: 768px) {
+    .agent-pipeline {
+        margin-left: 0;
+    }
 }

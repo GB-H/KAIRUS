@@ -284,6 +284,38 @@ function scrollToBottom() {
 
 
 /* =========================
+   FASE 2.3 - PIPELINE VISUAL DE AGENTES
+========================= */
+
+function renderAgentSteps(steps) {
+    if (!steps || steps.length === 0) return;
+
+    const messages = document.getElementById("messages");
+    const bar = document.createElement("div");
+    bar.className = "agent-pipeline";
+
+    const icons = {
+        ok: "✓",
+        retry: "⟳",
+        fail: "✗",
+        block: "🛡",
+        skip: "○",
+    };
+
+    steps.forEach((s) => {
+        const chip = document.createElement("span");
+        chip.className = "agent-chip status-" + (s.status || "ok");
+        chip.textContent =
+            s.agent + " " + (icons[s.status] || "✓");
+        bar.appendChild(chip);
+    });
+
+    messages.appendChild(bar);
+    scrollToBottom();
+}
+
+
+/* =========================
    ENVIAR MENSAGEM
 ========================= */
 
@@ -367,6 +399,8 @@ chatForm.addEventListener("submit", async (event) => {
                     if (event.type === "meta") {
                         meta = event;
                         streamingMsg = createStreamingMessage();
+                    } else if (event.type === "agents") {
+                        renderAgentSteps(event.steps);
                     } else if (event.type === "token") {
                         if (!streamingMsg) {
                             streamingMsg = createStreamingMessage();
