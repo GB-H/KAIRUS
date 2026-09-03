@@ -284,13 +284,35 @@ function scrollToBottom() {
 
 
 /* =========================
-   FASE 2.3 - PIPELINE VISUAL DE AGENTES
+   FASE 2.3/2.5 - PIPELINE VISUAL DE AGENTES
 ========================= */
 
+function clearPipelineLoading() {
+    const loading = document.getElementById("pipelineLoading");
+    if (loading) loading.remove();
+}
+
+function renderPipelineStart() {
+    clearPipelineLoading();
+
+    const bar = document.createElement("div");
+    bar.className = "agent-pipeline";
+    bar.id = "pipelineLoading";
+
+    const chip = document.createElement("span");
+    chip.className = "agent-chip status-retry";
+    chip.textContent = "🧠 ativando equipe de agentes…";
+    bar.appendChild(chip);
+
+    messages.appendChild(bar);
+    scrollToBottom();
+}
+
 function renderAgentSteps(steps) {
+    clearPipelineLoading();
+
     if (!steps || steps.length === 0) return;
 
-    const messages = document.getElementById("messages");
     const bar = document.createElement("div");
     bar.className = "agent-pipeline";
 
@@ -399,6 +421,8 @@ chatForm.addEventListener("submit", async (event) => {
                     if (event.type === "meta") {
                         meta = event;
                         streamingMsg = createStreamingMessage();
+                    } else if (event.type === "pipeline_start") {
+                        renderPipelineStart();
                     } else if (event.type === "agents") {
                         renderAgentSteps(event.steps);
                     } else if (event.type === "token") {
@@ -411,6 +435,7 @@ chatForm.addEventListener("submit", async (event) => {
                         streamingMsg.appendToken(event.text);
                         fullResponse += event.text;
                     } else if (event.type === "done") {
+                        clearPipelineLoading();
                         if (streamingMsg && (event.llm || event.tool)) {
                             streamingMsg.setBadges(event);
                         }
@@ -446,6 +471,7 @@ chatForm.addEventListener("submit", async (event) => {
         console.error(error);
 
         hideTyping();
+        clearPipelineLoading();
 
         if (!streamingMsg) {
             addMessage(

@@ -4,6 +4,7 @@ Modelo hibrido: regras para intencoes conhecidas + LLM para o resto.
 v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
 FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
 FASE 2.4: pipeline prioritario para tarefas complexas.
+FASE 2.5: evento "pipeline_start" imediato (feedback visual instantaneo).
 """
 
 import os
@@ -186,9 +187,6 @@ def generate_response(message: str, session_id: str = "default") -> dict:
         if orch_output:
             response_text = orch_output
             used_llm = True
-        else:
-            # Pipeline falhou, segue fluxo normal
-            pass
 
     if not response_text:
         if intent == INTENT_TOOL_USE:
@@ -274,8 +272,17 @@ def stream_response(message: str, session_id: str = "default"):
     orchestrated = False
     orch_steps = []
 
-    # FASE 2.4: Pipeline prioritario para tarefas complexas
-    if _orchestrator_enabled() and _is_complex_task(clean_message) and is_available():
+    # FASE 2.4: pipeline prioritario para tarefas complexas
+    # FASE 2.5: feedback imediato antes de processar
+    will_orchestrate = bool(
+        _orchestrator_enabled()
+        and _is_complex_task(clean_message)
+        and is_available()
+    )
+
+    if will_orchestrate:
+        # avisa o frontend ANTES de gastar tempo com os agentes
+        yield {"type": "pipeline_start"}
         orch_output, orch_steps = _run_orchestrator_safe(clean_message)
         if orch_output:
             orchestrated = True
@@ -305,8 +312,8 @@ def stream_response(message: str, session_id: str = "default"):
         "agents": orch_steps,
     }
 
-    # FASE 2.3: envia os steps do pipeline para o frontend
-    if orchestrated:
+    # FASE 2.3/2.5: envia os steps (ou lista vazia p/ limpar o loading)
+    if will_orchestrate:
         yield {"type": "agents", "steps": orch_steps}
 
     if orchestrated:

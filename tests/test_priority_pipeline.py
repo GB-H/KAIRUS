@@ -1,5 +1,7 @@
 """
 FASE 2.4 - Pipeline prioritario para tarefas complexas.
+FASE 2.5: no fallback, o evento agents chega com steps vazios
+(usado pelo frontend para limpar o indicador de loading).
 """
 import ai.engine as engine
 
@@ -94,8 +96,10 @@ def test_pipeline_falha_cai_nas_regras(monkeypatch):
         session_id="test_priority_3",
     ))
 
+    # FASE 2.5: o evento agents pode chegar, mas SEM steps (limpa loading)
     agent_events = [e for e in events if e["type"] == "agents"]
-    assert len(agent_events) == 0
+    for e in agent_events:
+        assert e["steps"] == []
 
     done = [e for e in events if e["type"] == "done"][0]
     assert "Resposta LLM simples" in done["response"]
