@@ -13,6 +13,7 @@ Regras:
 - Tools so executam se o agente tiver permissao (allowed_tools)
 - Tool que falha nao trava o fluxo (segue sem ela)
 - Planner com 2+ linhas numeradas -> pipeline multi-agente
+- Plano limitado a MAX_PLAN_STEPS etapas (custo/latencia)
 - Plano vazio/invalido -> agente unico (fallback)
 - Agente falhar no meio do pipeline -> fallback=True
 - Reviewer tem no maximo MAX_RETRIES tentativas
@@ -34,6 +35,7 @@ from .agents import (
 from .tools import detect_tool, execute_tool
 
 MAX_RETRIES = 2
+MAX_PLAN_STEPS = 3
 
 
 @dataclass
@@ -227,6 +229,9 @@ class Orchestrator:
             if plan.success
             else []
         )
+
+        # FASE 2.5: limita o plano (menos chamadas de IA = mais rapido)
+        plan_tasks = plan_tasks[:MAX_PLAN_STEPS]
 
         # Pipeline ativo apenas quando ha 2+ tarefas no plano
         if len(plan_tasks) >= 2:

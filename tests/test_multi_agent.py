@@ -2,6 +2,7 @@
 FASE 2.2 - Testes de pipeline multi-agente.
 
 Verifica colaboracao real entre agentes (Researcher -> Analyst -> Writer).
+FASE 2.5: plano limitado a MAX_PLAN_STEPS etapas.
 """
 from ai.orchestrator import Orchestrator
 
@@ -69,8 +70,6 @@ def test_pipeline_cada_etapa_alimenta_a_proxima():
         if "Security" in system:
             return "SEGURO"
         if "Planner" in system:
-            # Etapa 1 sem keywords de analyst/coder -> Researcher
-            # Etapa 2 com 'escreva' -> Writer
             return (
                 "1. Pesquisar informacoes de vendas\n"
                 "2. Escreva a conclusao"
@@ -88,7 +87,6 @@ def test_pipeline_cada_etapa_alimenta_a_proxima():
     orch = Orchestrator(llm_call=llm)
     orch.run("Analise e conclua sobre vendas")
 
-    # Writer recebe o output do Researcher no contexto
     writer_ctx = next(c for name, c in captured_contexts if name == "writer")
     assert "Dados coletados: A, B, C" in writer_ctx
 
@@ -99,7 +97,7 @@ def test_planner_sem_linhas_numeradas_usa_agente_unico():
         if "Security" in system:
             return "SEGURO"
         if "Planner" in system:
-            return "Plano criado"  # sem linhas numeradas
+            return "Plano criado"
         if "Reviewer" in system:
             return "APROVADO"
         return "resposta do agente"
@@ -108,7 +106,6 @@ def test_planner_sem_linhas_numeradas_usa_agente_unico():
     result = orch.run("escreva um texto sobre o mar")
 
     assert result.success is True
-    # Apenas 1 agente executado (writer)
     worker_steps = [
         s for s in result.steps
         if s.agent in ("researcher", "analyst", "writer", "coder")
@@ -131,7 +128,6 @@ def test_pipeline_quebra_se_agente_falha():
     orch = Orchestrator(llm_call=llm)
     result = orch.run("pesquise e analise")
 
-    # Security/planner ok, researcher falha, analyst nunca executou
     assert result.fallback is True
     assert result.success is False
 
@@ -153,7 +149,6 @@ def test_pipeline_com_tool():
         if "Reviewer" in system:
             return "APROVADO"
         if "Analyst" in system:
-            # Deve receber o resultado da calculadora no prompt/contexto
             return f"Analise feita com base em: {prompt}"
         if "Writer" in system:
             return "Conclusao final"
@@ -177,7 +172,7 @@ def test_pipeline_reviewer_rejeita_e_aprova_no_retry():
         if "Security" in system:
             return "SEGURO"
         if "Planner" in system:
-            return "Plano criado"  # agente unico
+            return "Plano criado"
         if "Reviewer" in system:
             attempt["n"] += 1
             if attempt["n"] == 1:
@@ -190,3 +185,30 @@ def test_pipeline_reviewer_rejeita_e_aprova_no_retry():
 
     assert result.success is True
     assert attempt["n"] == 2
+
+
+def test_plan_limitado_a_3_etapas():
+    """FASE 2.5: plano com 5 etapas executa no maximo 3 workers."""
+    def llm(prompt, system, model=None):
+        if "Security" in system:
+            return "SEGURO"
+        if "Planner" in system:
+            return (
+                "1. Pesquisar informacoes\n"
+                "2. Analisar os dados\n"
+                "3. Escreva o relatorio\n"
+                "4. Revisar o texto\n"
+                "5. Escreva a conclusao final"
+            )
+        if "Reviewer" in system:
+            return "APROVADO"
+        return "etapa feita"
+
+    orch = Orchestrator(llm_call=llm)
+    result = orch.run("crie um relatorio completo")
+
+    worker_steps = [
+        s for s in result.steps
+        if s.agent in ("researcher", "analyst", "writer", "coder")
+    ]
+    assert len(worker_steps) == 3
