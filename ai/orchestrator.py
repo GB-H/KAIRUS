@@ -3,17 +3,22 @@ KAIRUS v0.6.0 - Orchestrator (FASE 1.5 + FASE 2)
 
 Coordena os agentes especializados:
 
-Usuario -> Security -> Planner -> Tools -> Agente -> Reviewer -> Resposta
+FASE 2.2 - Pipeline multi-agente:
+
+Usuario -> Security -> Planner -> [Researcher -> Analyst -> Writer] -> Reviewer
 
 Regras:
 
 - Security pode bloquear entradas maliciosas
 - Tools so executam se o agente tiver permissao (allowed_tools)
 - Tool que falha nao trava o fluxo (segue sem ela)
+- Planner com 2+ linhas numeradas -> pipeline multi-agente
+- Plano vazio/invalido -> agente unico (fallback)
+- Agente falhar no meio do pipeline -> fallback=True
 - Reviewer tem no maximo MAX_RETRIES tentativas
-- Se o Reviewer reprovar todas as tentativas, fallback=True
 """
 
+import re
 from dataclasses import dataclass, field
 
 from .agents import (
@@ -63,6 +68,19 @@ class Orchestrator:
         ):
             self.registry.register(cls(llm_call=llm_call))
 
+    def _parse_plan(self, plan_text: str) -> list:
+        """Extrai tarefas de um plano em lista numerada."""
+        if not plan_text:
+            return []
+
+        tasks = []
+        for line in plan_text.split("\n"):
+            line = line.strip()
+            match = re.match(r"^\d+[\.\)]\s*(.+)$", line)
+            if match:
+                tasks.append(match.group(1).strip())
+        return tasks
+
     def classify(self, task: str) -> str:
         """Roteamento rapido por palavras-chave (sem gastar LLM)."""
 
@@ -99,17 +117,53 @@ class Orchestrator:
             k in t
             for k in (
                 "escreva",
+                "escrever",
                 "texto",
                 "redacao",
                 "email",
                 "historia",
                 "poema",
                 "resuma",
+                "relatorio",
             )
         ):
             return "writer"
 
         return "researcher"
+
+    def _execute_tool_if_allowed(
+        self, task: str, worker, steps: list
+    ) -> str:
+        """Executa tool se o agente tiver permissao."""
+        tool_context = ""
+        tool_name = detect_tool(task)
+
+        if tool_name and tool_name in worker.allowed_tools:
+            tool_output = execute_tool(tool_name, task)
+
+            if tool_output:
+                tool_context = (
+                    "\nResultado da ferramenta "
+                    + tool_name
+                    + ": "
+                    + tool_output
+                )
+                steps.append(
+                    Step(
+                        "tool:" + tool_name,
+                        "ok",
+                        tool_output[:200],
+                    )
+                )
+            else:
+                steps.append(
+                    Step(
+                        "tool:" + tool_name,
+                        "fail",
+                    )
+                )
+
+        return tool_context
 
     def run(self, task: str, context: str = "") -> OrchestratorResult:
 
@@ -165,43 +219,38 @@ class Orchestrator:
         )
 
         # ==========================================
-        # 3. AGENTE + TOOLS (FASE 2)
+        # 3. DECIDE: PIPELINE OU AGENTE UNICO
         # ==========================================
+
+        plan_tasks = (
+            self._parse_plan(plan.output)
+            if plan.success
+            else []
+        )
+
+        # Pipeline ativo apenas quando ha 2+ tarefas no plano
+        if len(plan_tasks) >= 2:
+            return self._run_pipeline(
+                task, plan_tasks, steps, context
+            )
+
+        # Fallback: agente unico (fluxo original da FASE 2.1)
+        return self._run_single_agent(
+            task, steps, context
+        )
+
+    def _run_single_agent(
+        self, task: str, steps: list, context: str
+    ) -> OrchestratorResult:
+        """Fluxo de agente unico + tools (FASE 2.1)."""
 
         worker_name = self.classify(task)
         worker = self.registry.get(worker_name)
 
-        # ---- 3.1 Tool execution com permissao ----
-        tool_context = ""
-        tool_name = detect_tool(task)
+        tool_context = self._execute_tool_if_allowed(
+            task, worker, steps
+        )
 
-        if tool_name and tool_name in worker.allowed_tools:
-            tool_output = execute_tool(tool_name, task)
-
-            if tool_output:
-                tool_context = (
-                    "\nResultado da ferramenta "
-                    + tool_name
-                    + ": "
-                    + tool_output
-                )
-                steps.append(
-                    Step(
-                        "tool:" + tool_name,
-                        "ok",
-                        tool_output[:200],
-                    )
-                )
-            else:
-                # Tool falhou: segue sem ela, sem travar o fluxo
-                steps.append(
-                    Step(
-                        "tool:" + tool_name,
-                        "fail",
-                    )
-                )
-
-        # ---- 3.2 Agente executa com contexto da tool ----
         exec_result = worker.run(
             task,
             context + tool_context,
@@ -214,9 +263,7 @@ class Orchestrator:
             )
         )
 
-        # Se o agente falhar, o Engine pode utilizar fallback.
         if not exec_result.success:
-
             return OrchestratorResult(
                 success=False,
                 output="",
@@ -224,13 +271,81 @@ class Orchestrator:
                 fallback=True,
             )
 
-        # ==========================================
-        # 4. REVIEWER
-        # ==========================================
+        return self._run_reviewer(
+            task, exec_result.output, steps, context,
+            worker, tool_context
+        )
+
+    def _run_pipeline(
+        self,
+        task: str,
+        plan_tasks: list,
+        steps: list,
+        initial_context: str,
+    ) -> OrchestratorResult:
+        """Executa agentes em cadeia: cada um recebe o output do anterior."""
+
+        context = initial_context
+        output = ""
+
+        for subtask in plan_tasks:
+            worker_name = self.classify(subtask)
+            worker = self.registry.get(worker_name)
+
+            # Tool opcional para esta sub-tarefa
+            tool_context = self._execute_tool_if_allowed(
+                subtask, worker, steps
+            )
+
+            agent_input = f"Tarefa geral: {task}\n\nEtapa: {subtask}"
+            exec_result = worker.run(
+                agent_input,
+                context + tool_context,
+            )
+
+            steps.append(
+                Step(
+                    worker_name,
+                    "ok" if exec_result.success else "fail",
+                    subtask[:100],
+                )
+            )
+
+            # Se qualquer agente falhar no meio, interrompe o pipeline
+            if not exec_result.success:
+                return OrchestratorResult(
+                    success=False,
+                    output=output,
+                    steps=steps,
+                    fallback=True,
+                )
+
+            # Output desta etapa vira contexto da proxima
+            output = exec_result.output
+            context = (
+                context
+                + tool_context
+                + "\nEtapa anterior (" + worker_name + "): "
+                + output
+            )
+
+        # Reviewer valida apenas o output final
+        return self._run_reviewer(
+            task, output, steps, context
+        )
+
+    def _run_reviewer(
+        self,
+        task: str,
+        final: str,
+        steps: list,
+        context: str = "",
+        worker=None,
+        tool_context: str = "",
+    ) -> OrchestratorResult:
+        """Reviewer com maximo de MAX_RETRIES tentativas."""
 
         reviewer = self.registry.get("reviewer")
-
-        final = exec_result.output
 
         for attempt in range(MAX_RETRIES):
 
@@ -274,6 +389,10 @@ class Orchestrator:
                 )
             )
 
+            # Sem worker anterior disponivel, nao ha o que refazer
+            if worker is None:
+                break
+
             redo = worker.run(
                 task,
                 context
@@ -287,10 +406,10 @@ class Orchestrator:
             # ======================================
 
             if not redo.success:
-
+                agent_name = getattr(worker, "name", "worker")
                 steps.append(
                     Step(
-                        worker_name,
+                        agent_name,
                         "fail_on_retry",
                     )
                 )
@@ -305,7 +424,7 @@ class Orchestrator:
             final = redo.output
 
         # ==========================================
-        # 5. LIMITE DE RETRIES ATINGIDO
+        # LIMITE DE RETRIES ATINGIDO
         # ==========================================
 
         steps.append(
