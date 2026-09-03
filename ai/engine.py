@@ -3,6 +3,7 @@ KAIRUS AI Engine - Orquestrador principal.
 Modelo hibrido: regras para intencoes conhecidas + LLM para o resto.
 v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
 FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
+FASE 2.4: pipeline prioritario para tarefas complexas.
 """
 
 import os
@@ -179,25 +180,28 @@ def generate_response(message: str, session_id: str = "default") -> dict:
     tool_used = None
     used_llm = False
 
-    if intent == INTENT_TOOL_USE:
-        tool_name = detect_tool(clean_message)
-        if tool_name:
-            tool_used = tool_name
-            result = execute_tool(tool_name, clean_message)
-            response_text = result if result else pick(UNKNOWN)
-
-    elif intent in RULE_INTENTS:
-        response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
-
-    elif intent == INTENT_UNKNOWN and is_available():
-        orch_output = None
-        if _orchestrator_enabled() and _is_complex_task(clean_message):
-            orch_output, _steps = _run_orchestrator_safe(clean_message)
-
+    # FASE 2.4: Pipeline prioritario para tarefas complexas
+    if _orchestrator_enabled() and _is_complex_task(clean_message) and is_available():
+        orch_output, _steps = _run_orchestrator_safe(clean_message)
         if orch_output:
             response_text = orch_output
             used_llm = True
         else:
+            # Pipeline falhou, segue fluxo normal
+            pass
+
+    if not response_text:
+        if intent == INTENT_TOOL_USE:
+            tool_name = detect_tool(clean_message)
+            if tool_name:
+                tool_used = tool_name
+                result = execute_tool(tool_name, clean_message)
+                response_text = result if result else pick(UNKNOWN)
+
+        elif intent in RULE_INTENTS:
+            response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
+
+        elif intent == INTENT_UNKNOWN and is_available():
             llm_response = generate_llm_response(
                 message=clean_message,
                 history=memory.messages,
@@ -208,8 +212,8 @@ def generate_response(message: str, session_id: str = "default") -> dict:
             else:
                 response_text = pick(UNKNOWN)
 
-    else:
-        response_text = pick(UNKNOWN)
+        else:
+            response_text = pick(UNKNOWN)
 
     memory.add_message("user", clean_message, intent)
     memory.add_message("assistant", response_text, intent)
@@ -270,30 +274,33 @@ def stream_response(message: str, session_id: str = "default"):
     orchestrated = False
     orch_steps = []
 
-    if intent == INTENT_TOOL_USE:
-        tool_name = detect_tool(clean_message)
-        if tool_name:
-            tool_used = tool_name
-            full_text = execute_tool(tool_name, clean_message) or pick(UNKNOWN)
+    # FASE 2.4: Pipeline prioritario para tarefas complexas
+    if _orchestrator_enabled() and _is_complex_task(clean_message) and is_available():
+        orch_output, orch_steps = _run_orchestrator_safe(clean_message)
+        if orch_output:
+            orchestrated = True
+            full_text = orch_output
 
-    elif intent in RULE_INTENTS:
-        full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
+    if not orchestrated:
+        if intent == INTENT_TOOL_USE:
+            tool_name = detect_tool(clean_message)
+            if tool_name:
+                tool_used = tool_name
+                full_text = execute_tool(tool_name, clean_message) or pick(UNKNOWN)
 
-    elif intent == INTENT_UNKNOWN and is_available():
-        if _orchestrator_enabled() and _is_complex_task(clean_message):
-            orch_output, orch_steps = _run_orchestrator_safe(clean_message)
-            if orch_output:
-                orchestrated = True
-                full_text = orch_output
-        used_llm = True
+        elif intent in RULE_INTENTS:
+            full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
 
-    else:
-        full_text = pick(UNKNOWN)
+        elif intent == INTENT_UNKNOWN and is_available():
+            used_llm = True
+
+        else:
+            full_text = pick(UNKNOWN)
 
     yield {
         "type": "meta",
         "intent": intent,
-        "llm": used_llm,
+        "llm": used_llm or orchestrated,
         "tool": tool_used,
         "agents": orch_steps,
     }
@@ -336,8 +343,8 @@ def stream_response(message: str, session_id: str = "default"):
         "type": "done",
         "response": full_text,
         "intent": intent,
-        "model": f"{NAME}-llm-{VERSION}" if used_llm else f"{NAME}-core-{VERSION}",
-        "llm": used_llm,
+        "model": f"{NAME}-llm-{VERSION}" if (used_llm or orchestrated) else f"{NAME}-core-{VERSION}",
+        "llm": used_llm or orchestrated,
         "tool": tool_used,
         "agents": orch_steps,
     }
