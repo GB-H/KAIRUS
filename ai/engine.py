@@ -5,7 +5,7 @@ v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
 FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
 FASE 2.4: pipeline prioritario para tarefas complexas.
 FASE 2.5: evento "pipeline_start" imediato (feedback visual instantaneo).
-FASE 3.1: memoria de longo prazo por usuario (nome persiste entre conversas).
+FASE 3.1: memoria de longo prazo por usuario + saudacao personalizada.
 """
 
 import os
@@ -300,8 +300,6 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
     orchestrated = False
     orch_steps = []
 
-    # FASE 2.4: pipeline prioritario para tarefas complexas
-    # FASE 2.5: feedback imediato antes de processar
     will_orchestrate = bool(
         _orchestrator_enabled()
         and _is_complex_task(clean_message)
@@ -415,10 +413,13 @@ def _handle_rule_intent(intent: str, message: str, memory, is_repeat: bool, user
         stage = get_conversation_stage(memory.message_count)
         user_name = memory.get_user_info("name")
 
-        if stage == "opening":
-            return pick(CONVERSATION_OPENING)
+        # FASE 3.1: se lembra do nome, cumprimenta pelo nome (mesmo conversa nova)
+        if user_name and stage == "opening":
+            return f"Oi, {user_name}! Que bom te ver de novo. Como posso ajudar?"
         elif user_name:
             return f"Oi de novo, {user_name}! Como posso ajudar agora?"
+        if stage == "opening":
+            return pick(CONVERSATION_OPENING)
         return pick(GREETINGS)
 
     else:
