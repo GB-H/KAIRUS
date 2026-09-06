@@ -5,6 +5,7 @@ v0.6.0: modo multi-agente (Orchestrator) atras da flag ORCHESTRATOR_ENABLED.
 FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
 FASE 2.4: pipeline prioritario para tarefas complexas.
 FASE 2.5: evento "pipeline_start" imediato (feedback visual instantaneo).
+FASE 3.1: memoria de longo prazo por usuario (nome persiste entre conversas).
 """
 
 import os
@@ -69,6 +70,7 @@ from ai.llm import (
 )
 from ai.personality import NAME, VERSION
 from ai.orchestrator import Orchestrator
+from ai.longterm import remember, recall
 
 
 RULE_INTENTS = {
@@ -137,11 +139,7 @@ def _llm_adapter(prompt: str, system: str, model=None) -> str:
 
 def _run_orchestrator_safe(message: str):
     """Roda a equipe de agentes. Se QUALQUER coisa falhar, retorna (None, [])
-    e o engine segue o fluxo normal. O KAIRUS nunca fica mudo.
-
-    Retorna: (output, steps_detalhados)
-    steps_detalhados: [{"agent": nome, "status": status}, ...]
-    """
+    e o engine segue o fluxo normal. O KAIRUS nunca fica mudo."""
     try:
         orch = Orchestrator(llm_call=_llm_adapter)
         result = orch.run(message)
@@ -161,9 +159,36 @@ def _run_orchestrator_safe(message: str):
     return None, []
 
 
-def generate_response(message: str, session_id: str = "default") -> dict:
+# =========================
+# MEMORIA DE LONGO PRAZO (FASE 3.1)
+# =========================
+
+def _hydrate_longterm(memory, user_id):
+    """Copia fatos permanentes do usuario para a sessao atual."""
+    try:
+        if not memory.get_user_info("name"):
+            facts = recall(user_id)
+            if facts.get("name"):
+                memory.set_user_info("name", facts["name"])
+    except Exception:
+        pass
+
+
+def _persist_name(user_id, name):
+    """Salva o nome do usuario na memoria permanente."""
+    try:
+        if user_id is not None and name:
+            remember(user_id, "name", name)
+    except Exception:
+        pass
+
+
+def generate_response(message: str, session_id: str = "default", user_id=None) -> dict:
     clean_message = message.strip()
     memory = get_memory(session_id)
+
+    if user_id is not None:
+        _hydrate_longterm(memory, user_id)
 
     if not clean_message:
         return {
@@ -197,7 +222,7 @@ def generate_response(message: str, session_id: str = "default") -> dict:
                 response_text = result if result else pick(UNKNOWN)
 
         elif intent in RULE_INTENTS:
-            response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
+            response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat, user_id)
 
         elif intent == INTENT_UNKNOWN and is_available():
             llm_response = generate_llm_response(
@@ -242,10 +267,13 @@ def generate_response(message: str, session_id: str = "default") -> dict:
     return result
 
 
-def stream_response(message: str, session_id: str = "default"):
+def stream_response(message: str, session_id: str = "default", user_id=None):
     """Versao streaming do generate_response."""
     clean_message = message.strip()
     memory = get_memory(session_id)
+
+    if user_id is not None:
+        _hydrate_longterm(memory, user_id)
 
     if not clean_message:
         text = "Voce nao enviou nenhuma mensagem."
@@ -281,7 +309,6 @@ def stream_response(message: str, session_id: str = "default"):
     )
 
     if will_orchestrate:
-        # avisa o frontend ANTES de gastar tempo com os agentes
         yield {"type": "pipeline_start"}
         orch_output, orch_steps = _run_orchestrator_safe(clean_message)
         if orch_output:
@@ -296,7 +323,7 @@ def stream_response(message: str, session_id: str = "default"):
                 full_text = execute_tool(tool_name, clean_message) or pick(UNKNOWN)
 
         elif intent in RULE_INTENTS:
-            full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat)
+            full_text = _handle_rule_intent(intent, clean_message, memory, is_repeat, user_id)
 
         elif intent == INTENT_UNKNOWN and is_available():
             used_llm = True
@@ -312,12 +339,10 @@ def stream_response(message: str, session_id: str = "default"):
         "agents": orch_steps,
     }
 
-    # FASE 2.3/2.5: envia os steps (ou lista vazia p/ limpar o loading)
     if will_orchestrate:
         yield {"type": "agents", "steps": orch_steps}
 
     if orchestrated:
-        # resposta da equipe de agentes, enviada em pedacos (efeito de digitar)
         chunk = 4
         for i in range(0, len(full_text), chunk):
             yield {"type": "token", "text": full_text[i:i + chunk]}
@@ -357,11 +382,12 @@ def stream_response(message: str, session_id: str = "default"):
     }
 
 
-def _handle_rule_intent(intent: str, message: str, memory, is_repeat: bool) -> str:
+def _handle_rule_intent(intent: str, message: str, memory, is_repeat: bool, user_id=None) -> str:
     if intent == INTENT_NAME_TELL:
         name = extract_name(message)
         if name:
             memory.set_user_info("name", name)
+            _persist_name(user_id, name)
             template = random.choice(NAME_TELL)
             return template.format(name=name)
         return pick(UNKNOWN)

@@ -3,9 +3,9 @@ FASE 2.2 - Testes de pipeline multi-agente.
 
 Verifica colaboracao real entre agentes (Researcher -> Analyst -> Writer).
 FASE 2.5: plano limitado a MAX_PLAN_STEPS etapas.
-FASE 2.6: Security por regras, backoff entre calls.
+FASE 2.6: Security por regras, backoff configuravel.
 """
-from ai.orchestrator import Orchestrator, CALL_DELAY_SECONDS
+from ai.orchestrator import Orchestrator
 
 
 def pipeline_llm(captured=None):
@@ -43,7 +43,26 @@ def pipeline_llm(captured=None):
 
 def test_pipeline_duas_etapas():
     """FASE 2.6: plano limitado a 2 etapas (Researcher -> Writer)."""
-    llm, captured = pipeline_llm()
+    captured = {}
+
+    def llm(prompt, system, model=None):
+        if "Security" in system:
+            return "SEGURO"
+        if "Planner" in system:
+            return (
+                "1. Pesquisar informacoes sobre o tema\n"
+                "2. Escrever o relatorio final"
+            )
+        if "Reviewer" in system:
+            return "APROVADO"
+        if "Researcher" in system:
+            captured["researcher_called"] = True
+            return "Informacoes coletadas: X, Y, Z"
+        if "Writer" in system:
+            captured["writer_called"] = True
+            return "Relatorio final redigido com base nas etapas anteriores"
+        return "resposta generica"
+
     orch = Orchestrator(llm_call=llm)
 
     result = orch.run(
@@ -59,7 +78,7 @@ def test_pipeline_duas_etapas():
         s for s in result.steps
         if s.agent in ("researcher", "analyst", "writer")
     ]
-    assert len(worker_steps) == 2  # FASE 2.6: maximo 2 etapas
+    assert len(worker_steps) == 2
 
 
 def test_pipeline_cada_etapa_alimenta_a_proxima():
@@ -184,7 +203,7 @@ def test_pipeline_reviewer_rejeita_e_aprova_no_retry():
     result = orch.run("escreva um texto sobre IA")
 
     assert result.success is True
-    assert attempt["n"] == 1  # FASE 2.6: maximo 1 retry
+    assert attempt["n"] == 2
 
 
 def test_plan_limitado_a_2_etapas():
@@ -211,7 +230,7 @@ def test_plan_limitado_a_2_etapas():
         s for s in result.steps
         if s.agent in ("researcher", "analyst", "writer", "coder")
     ]
-    assert len(worker_steps) == 2  # FASE 2.6: maximo 2 etapas
+    assert len(worker_steps) == 2
 
 
 def test_security_por_regras_sem_llm():
@@ -231,7 +250,7 @@ def test_security_por_regras_sem_llm():
     result = orch.run("escreva um texto sobre IA")
 
     assert result.success is True
-    assert llm_called["called"] is False  # Security nao chamou LLM
+    assert llm_called["called"] is False
 
     security_steps = [s for s in result.steps if s.agent == "security"]
     assert len(security_steps) == 1

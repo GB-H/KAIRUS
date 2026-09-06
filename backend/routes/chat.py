@@ -54,7 +54,11 @@ async def chat(
         create_conversation(request.session_id, current_user["user_id"])
     
     clean_message = sanitize_input(request.message)
-    result = generate_response(clean_message, request.session_id)
+    result = generate_response(
+        clean_message,
+        request.session_id,
+        user_id=current_user["user_id"],
+    )
 
     return ChatResponse(
         response=result["response"],
@@ -84,7 +88,11 @@ async def chat_stream(
     clean_message = sanitize_input(request.message)
 
     def event_generator():
-        for event in stream_response(clean_message, request.session_id):
+        for event in stream_response(
+            clean_message,
+            request.session_id,
+            user_id=current_user["user_id"],
+        ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 

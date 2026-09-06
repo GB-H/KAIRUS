@@ -1,6 +1,7 @@
 """
 Conexao e operacoes com o banco de dados do KAIRUS.
 SQLite local (desenvolvimento) ou PostgreSQL (producao no Render).
+FASE 3.1: tabela longterm_memory (memoria por usuario).
 """
 
 import sqlite3
@@ -99,6 +100,14 @@ def init_db():
             key TEXT NOT NULL,
             value TEXT NOT NULL,
             PRIMARY KEY (conversation_id, key)
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS longterm_memory (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
         )
         """,
     ]
@@ -276,7 +285,7 @@ def get_message_count(conv_id: str) -> int:
 
 
 # =========================
-# USER INFO
+# USER INFO (por conversa)
 # =========================
 
 def save_user_info(conv_id: str, key: str, value: str):
@@ -305,3 +314,47 @@ def get_user_info(conv_id: str) -> dict:
             (conv_id,), fetchall=True)
     conn.close()
     return {row["key"]: row["value"] for row in rows}
+
+
+# =========================
+# LONG-TERM MEMORY (FASE 3.1)
+# =========================
+
+def set_longterm_memory(user_id: int, key: str, value: str):
+    """Salva um fato permanente do usuario."""
+    conn = get_connection()
+    if USE_POSTGRES:
+        _execute(conn,
+            """INSERT INTO longterm_memory (user_id, key, value) VALUES (%s, %s, %s)
+               ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value""",
+            (user_id, key, value))
+    else:
+        _execute(conn,
+            "INSERT OR REPLACE INTO longterm_memory (user_id, key, value) VALUES (?, ?, ?)",
+            (user_id, key, value))
+    conn.close()
+
+
+def get_longterm_memory(user_id: int) -> dict:
+    """Recupera todos os fatos permanentes do usuario."""
+    conn = get_connection()
+    if USE_POSTGRES:
+        rows = _execute(conn,
+            "SELECT key, value FROM longterm_memory WHERE user_id = %s",
+            (user_id,), fetchall=True)
+    else:
+        rows = _execute(conn,
+            "SELECT key, value FROM longterm_memory WHERE user_id = ?",
+            (user_id,), fetchall=True)
+    conn.close()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def delete_longterm_memory(user_id: int, key: str):
+    """Esquece um fato permanente do usuario."""
+    conn = get_connection()
+    if USE_POSTGRES:
+        _execute(conn, "DELETE FROM longterm_memory WHERE user_id = %s AND key = %s", (user_id, key))
+    else:
+        _execute(conn, "DELETE FROM longterm_memory WHERE user_id = ? AND key = ?", (user_id, key))
+    conn.close()
