@@ -7,6 +7,7 @@ FASE 2.4: pipeline prioritario para tarefas complexas.
 FASE 2.5: evento "pipeline_start" imediato (feedback visual instantaneo).
 FASE 3.1: memoria de longo prazo por usuario + saudacao personalizada.
 FASE 3.2: comandos "lembre que..." e "o que voce lembra de mim?".
+FASE 3.4: memoria injetada no LLM e no pipeline (personalizacao).
 """
 
 import os
@@ -138,12 +139,12 @@ def _llm_adapter(prompt: str, system: str, model=None) -> str:
     ) or ""
 
 
-def _run_orchestrator_safe(message: str):
+def _run_orchestrator_safe(message: str, context: str = ""):
     """Roda a equipe de agentes. Se QUALQUER coisa falhar, retorna (None, [])
     e o engine segue o fluxo normal. O KAIRUS nunca fica mudo."""
     try:
         orch = Orchestrator(llm_call=_llm_adapter)
-        result = orch.run(message)
+        result = orch.run(message, context)
         if (
             result
             and result.success
@@ -184,6 +185,31 @@ def _persist_name(user_id, name):
         pass
 
 
+def _build_memory_context(user_id, memory) -> str:
+    """FASE 3.4: monta o contexto de memoria para o LLM/pipeline."""
+    try:
+        facts = recall(user_id) if user_id is not None else {}
+    except Exception:
+        facts = {}
+
+    if not facts and memory is not None:
+        name = memory.get_user_info("name")
+        if name:
+            facts = {"name": name}
+
+    if not facts:
+        return ""
+
+    lines = []
+    if facts.get("name"):
+        lines.append(f"Nome do usuario: {facts['name']}")
+    for f in (facts.get("facts") or "").split("\n"):
+        if f:
+            lines.append(f"Fato sobre o usuario: {f}")
+
+    return " | ".join(lines)
+
+
 def generate_response(message: str, session_id: str = "default", user_id=None) -> dict:
     clean_message = message.strip()
     memory = get_memory(session_id)
@@ -193,6 +219,9 @@ def generate_response(message: str, session_id: str = "default", user_id=None) -
 
     # FASE 3.2: comandos de memoria tem prioridade
     memory_command_response = handle_memory_command(clean_message, user_id)
+
+    # FASE 3.4: contexto de memoria para o LLM/pipeline
+    mem_ctx = _build_memory_context(user_id, memory)
 
     if not clean_message:
         return {
@@ -212,7 +241,7 @@ def generate_response(message: str, session_id: str = "default", user_id=None) -
 
     # FASE 2.4: Pipeline prioritario para tarefas complexas
     if _orchestrator_enabled() and _is_complex_task(clean_message) and is_available():
-        orch_output, _steps = _run_orchestrator_safe(clean_message)
+        orch_output, _steps = _run_orchestrator_safe(clean_message, mem_ctx)
         if orch_output:
             response_text = orch_output
             used_llm = True
@@ -232,8 +261,11 @@ def generate_response(message: str, session_id: str = "default", user_id=None) -
             response_text = _handle_rule_intent(intent, clean_message, memory, is_repeat, user_id)
 
         elif intent == INTENT_UNKNOWN and is_available():
+            llm_message = clean_message
+            if mem_ctx:
+                llm_message = f"[Memoria do usuario: {mem_ctx}]\n{clean_message}"
             llm_response = generate_llm_response(
-                message=clean_message,
+                message=llm_message,
                 history=memory.messages,
             )
             if llm_response:
@@ -285,6 +317,9 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
     # FASE 3.2: comandos de memoria tem prioridade
     memory_command_response = handle_memory_command(clean_message, user_id)
 
+    # FASE 3.4: contexto de memoria para o LLM/pipeline
+    mem_ctx = _build_memory_context(user_id, memory)
+
     if not clean_message:
         text = "Voce nao enviou nenhuma mensagem."
         yield {"type": "meta", "intent": "empty", "llm": False, "tool": None, "agents": []}
@@ -318,7 +353,7 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
 
     if will_orchestrate:
         yield {"type": "pipeline_start"}
-        orch_output, orch_steps = _run_orchestrator_safe(clean_message)
+        orch_output, orch_steps = _run_orchestrator_safe(clean_message, mem_ctx)
         if orch_output:
             orchestrated = True
             full_text = orch_output
@@ -360,13 +395,16 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
 
     elif used_llm:
         streamed = False
-        for token in stream_llm_response(clean_message, history=memory.messages):
+        llm_message = clean_message
+        if mem_ctx:
+            llm_message = f"[Memoria do usuario: {mem_ctx}]\n{clean_message}"
+        for token in stream_llm_response(llm_message, history=memory.messages):
             streamed = True
             full_text += token
             yield {"type": "token", "text": token}
 
         if not streamed:
-            text = generate_llm_response(clean_message, history=memory.messages)
+            text = generate_llm_response(llm_message, history=memory.messages)
             if text:
                 full_text = text
                 yield {"type": "token", "text": text}

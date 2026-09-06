@@ -25,7 +25,7 @@ def test_tarefa_complexa_vai_pro_pipeline(monkeypatch):
     monkeypatch.setattr(
         engine,
         "_run_orchestrator_safe",
-        lambda msg: ("Resposta do pipeline.", _fake_steps()),
+        lambda msg, ctx="": ("Resposta do pipeline.", _fake_steps()),
     )
 
     events = list(engine.stream_response(
@@ -51,7 +51,7 @@ def test_tarefa_curta_vai_pras_regras(monkeypatch):
 
     orchestrator_called = {"called": False}
 
-    def fake_orchestrator(msg):
+    def fake_orchestrator(msg, ctx=""):
         orchestrator_called["called"] = True
         return ("Pipeline.", _fake_steps())
 
@@ -83,7 +83,7 @@ def test_pipeline_falha_cai_nas_regras(monkeypatch):
     monkeypatch.setattr(
         engine,
         "_run_orchestrator_safe",
-        lambda msg: (None, []),
+        lambda msg, ctx="": (None, []),
     )
     monkeypatch.setattr(
         engine,

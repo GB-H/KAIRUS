@@ -22,7 +22,7 @@ def test_stream_emite_evento_agents(monkeypatch):
     monkeypatch.setattr(
         engine,
         "_run_orchestrator_safe",
-        lambda msg: ("Resposta do pipeline.", _fake_steps()),
+        lambda msg, ctx="": ("Resposta do pipeline.", _fake_steps()),
     )
 
     events = list(engine.stream_response(
@@ -70,7 +70,7 @@ def test_pipeline_start_eh_emitido_e_limpa_no_fallback(monkeypatch):
     monkeypatch.setattr(
         engine,
         "_run_orchestrator_safe",
-        lambda msg: (None, []),
+        lambda msg, ctx="": (None, []),
     )
     monkeypatch.setattr(
         engine,
