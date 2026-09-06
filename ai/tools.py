@@ -1,5 +1,6 @@
 """
 Sistema de ferramentas do KAIRUS.
+FASE 4: web_search real via DuckDuckGo.
 """
 
 import re
@@ -96,16 +97,12 @@ def tool_datetime(message: str) -> str:
     ]
 )
 def tool_calculator(message: str) -> str:
-    # Extrair todos os numeros e operadores da mensagem
-    # Remove tudo que nao e numero, operador, ponto, parenteses, espaco
     cleaned = re.sub(r'[^\d\s\+\-\*\/\.\(\)\^]', ' ', message)
     cleaned = cleaned.strip()
 
-    # Encontrar a expressao matematica (sequencia de numeros e operadores)
     match = re.search(r'([\d][\d\s\+\-\*\/\.\(\)\^]*[\d])', cleaned)
 
     if not match:
-        # Tentar pegar qualquer numero
         numbers = re.findall(r'[\d]+\.?[\d]*', message)
         operators = re.findall(r'[\+\-\*\/\^]', message)
 
@@ -118,7 +115,6 @@ def tool_calculator(message: str) -> str:
 
     expr = expr.replace("^", "**")
 
-    # Seguranca
     if not re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', expr.replace('**', '')):
         return "Expressao invalida. Use apenas numeros e operadores (+, -, *, /)."
 
@@ -190,3 +186,87 @@ def tool_list_tools(message: str) -> str:
     for t in tools:
         lines.append(f"  - {t['name']}: {t['description']}")
     return "\n".join(lines)
+
+
+# =========================
+# WEB SEARCH (FASE 4)
+# =========================
+
+@register_tool(
+    name="web_search",
+    description="Pesquisa na internet via DuckDuckGo",
+    keywords=[
+        "pesquise", "pesquisar", "procure", "buscar",
+        "busca na internet", "web search", "google",
+        "ultimas noticias", "novidades sobre",
+        "informacoes sobre",
+    ]
+)
+def tool_web_search(message: str) -> str:
+    """Busca na internet via DuckDuckGo (gratis, sem API key).
+
+    Retorna um resumo dos top N resultados.
+    Se falhar, retorna None (o orchestrator continua sem a tool).
+    """
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError:
+        return None
+
+    # Extrai o termo de busca
+    query = _extract_search_query(message)
+    if not query:
+        return None
+
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=4))
+    except Exception:
+        return None
+
+    if not results:
+        return f"Nao encontrei resultados para '{query}'."
+
+    lines = [f"Resultados da pesquisa sobre '{query}':"]
+    for r in results:
+        title = r.get("title", "Sem titulo")
+        body = r.get("body", "").strip()
+        href = r.get("href", "")
+        if body:
+            lines.append(f"- {title}: {body}")
+            if href:
+                lines.append(f"  ({href})")
+
+    return "\n".join(lines)
+
+
+def _extract_search_query(message: str) -> str:
+    """Extrai o termo de busca da mensagem.
+
+    Exemplos:
+      "pesquise as ultimas noticias sobre IA" -> "ultimas noticias sobre IA"
+      "pesquise sobre buraco negro" -> "buraco negro"
+      "busca na internet python" -> "python"
+    """
+    m = message.lower().strip()
+
+    prefixes = [
+        "pesquise sobre", "pesquise as", "pesquise",
+        "procure sobre", "procure",
+        "buscar sobre", "buscar", "busca na internet sobre",
+        "busca na internet", "web search sobre", "web search",
+        "ultimas noticias sobre", "novidades sobre",
+        "informacoes sobre",
+    ]
+
+    for p in prefixes:
+        if m.startswith(p):
+            term = message[len(p):].strip()
+            if term:
+                return term
+
+    # Fallback: usa a mensagem inteira se for curta
+    if len(message) < 80:
+        return message.strip()
+
+    return ""
