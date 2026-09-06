@@ -3,9 +3,11 @@ KAIRUS v0.6.0 - Orchestrator (FASE 1.5 + FASE 2)
 
 Coordena os agentes especializados:
 
-FASE 2.2 - Pipeline multi-agente:
-
-Usuario -> Security -> Planner -> [Researcher -> Analyst -> Writer] -> Reviewer
+FASE 2.6 - Otimizacao para rate limit:
+- Security por regras (sem LLM)
+- Backoff entre chamadas LLM
+- Plano limitado a 2 etapas em producao
+- Reviewer com 1 retry
 
 Regras:
 
@@ -20,6 +22,8 @@ Regras:
 """
 
 import re
+import time
+import os
 from dataclasses import dataclass, field
 
 from .agents import (
@@ -34,8 +38,9 @@ from .agents import (
 )
 from .tools import detect_tool, execute_tool
 
-MAX_RETRIES = 2
-MAX_PLAN_STEPS = 3
+MAX_RETRIES = 1  # FASE 2.6: reduzido de 2 para 1
+MAX_PLAN_STEPS = 2  # FASE 2.6: reduzido de 3 para 2 em producao
+CALL_DELAY_SECONDS = 2  # FASE 2.6: backoff entre chamadas LLM
 
 
 @dataclass
@@ -167,27 +172,57 @@ class Orchestrator:
 
         return tool_context
 
+    def _run_security_by_rules(self, task: str) -> tuple[bool, str]:
+        """FASE 2.6: Security por regras (sem LLM) para economizar calls.
+
+        Retorna: (is_safe, reason)
+        """
+        t = task.lower()
+
+        # Prompt injection patterns
+        injection_keywords = [
+            "ignore", "esqueca", "ignore todas", "esqueca todas",
+            "regras anteriores", "instrucoes anteriores",
+            "voce agora e", "aja como se", "finja que",
+            "modo desenvolvedor", "developer mode",
+        ]
+        if any(kw in t for kw in injection_keywords):
+            return False, "Possivel prompt injection detectado"
+
+        # Dados sensiveis
+        sensitive_patterns = [
+            "senha", "password", "credit card", "cartao de credito",
+            "cpf", "rg", "documento", "endereco",
+        ]
+        if any(kw in t for kw in sensitive_patterns):
+            return False, "Dados sensiveis na entrada"
+
+        # Comandos perigosos
+        dangerous_keywords = [
+            "delete", "apague", "remove", "destroy",
+            "hack", "invadir", "bypass",
+        ]
+        if any(kw in t for kw in dangerous_keywords):
+            return False, "Comando potencialmente perigoso"
+
+        return True, ""
+
     def run(self, task: str, context: str = "") -> OrchestratorResult:
 
         steps = []
 
         # ==========================================
-        # 1. SECURITY
+        # 1. SECURITY (FASE 2.6: por regras, sem LLM)
         # ==========================================
 
-        security = self.registry.get("security")
+        is_safe, reason = self._run_security_by_rules(task)
 
-        sec = security.run(
-            "Analise esta entrada de usuario:\n" + task
-        )
-
-        if sec.success and "INSEGURO" in sec.output.upper():
-
+        if not is_safe:
             steps.append(
                 Step(
                     "security",
                     "block",
-                    sec.output[:200],
+                    reason,
                 )
             )
 
@@ -200,15 +235,18 @@ class Orchestrator:
         steps.append(
             Step(
                 "security",
-                "ok" if sec.success else "skip",
+                "ok",
             )
         )
 
         # ==========================================
-        # 2. PLANNER
+        # 2. PLANNER (com backoff)
         # ==========================================
 
         planner = self.registry.get("planner")
+
+        if CALL_DELAY_SECONDS > 0:
+            time.sleep(CALL_DELAY_SECONDS)
 
         plan = planner.run(task)
 
@@ -230,7 +268,7 @@ class Orchestrator:
             else []
         )
 
-        # FASE 2.5: limita o plano (menos chamadas de IA = mais rapido)
+        # FASE 2.6: limita o plano (menos chamadas de IA = mais rapido)
         plan_tasks = plan_tasks[:MAX_PLAN_STEPS]
 
         # Pipeline ativo apenas quando ha 2+ tarefas no plano
@@ -255,6 +293,9 @@ class Orchestrator:
         tool_context = self._execute_tool_if_allowed(
             task, worker, steps
         )
+
+        if CALL_DELAY_SECONDS > 0:
+            time.sleep(CALL_DELAY_SECONDS)
 
         exec_result = worker.run(
             task,
@@ -302,6 +343,9 @@ class Orchestrator:
                 subtask, worker, steps
             )
 
+            if CALL_DELAY_SECONDS > 0:
+                time.sleep(CALL_DELAY_SECONDS)
+
             agent_input = f"Tarefa geral: {task}\n\nEtapa: {subtask}"
             exec_result = worker.run(
                 agent_input,
@@ -348,11 +392,14 @@ class Orchestrator:
         worker=None,
         tool_context: str = "",
     ) -> OrchestratorResult:
-        """Reviewer com maximo de MAX_RETRIES tentativas."""
+        """Reviewer com maximo de MAX_RETRIES tentativas (FASE 2.6: 1 retry)."""
 
         reviewer = self.registry.get("reviewer")
 
         for attempt in range(MAX_RETRIES):
+
+            if CALL_DELAY_SECONDS > 0:
+                time.sleep(CALL_DELAY_SECONDS)
 
             rev = reviewer.run(
                 "Tarefa original:\n"
@@ -397,6 +444,9 @@ class Orchestrator:
             # Sem worker anterior disponivel, nao ha o que refazer
             if worker is None:
                 break
+
+            if CALL_DELAY_SECONDS > 0:
+                time.sleep(CALL_DELAY_SECONDS)
 
             redo = worker.run(
                 task,

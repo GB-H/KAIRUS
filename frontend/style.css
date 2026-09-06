@@ -883,4 +883,11 @@ body {
     .agent-pipeline {
         margin-left: 0;
     }
+}/* =========================
+   LOGO NOVA (FASE 2.6)
+========================= */
+
+.welcome-logo-img {
+    border-radius: 16px;
+    box-shadow: 0 0 30px rgba(220, 38, 38, 0.3);
 }
