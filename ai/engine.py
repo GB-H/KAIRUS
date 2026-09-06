@@ -6,6 +6,7 @@ FASE 2.3: eventos SSE "agents" com os steps do pipeline em tempo real.
 FASE 2.4: pipeline prioritario para tarefas complexas.
 FASE 2.5: evento "pipeline_start" imediato (feedback visual instantaneo).
 FASE 3.1: memoria de longo prazo por usuario + saudacao personalizada.
+FASE 3.2: comandos "lembre que..." e "o que voce lembra de mim?".
 """
 
 import os
@@ -70,7 +71,7 @@ from ai.llm import (
 )
 from ai.personality import NAME, VERSION
 from ai.orchestrator import Orchestrator
-from ai.longterm import remember, recall
+from ai.longterm import remember, recall, handle_memory_command
 
 
 RULE_INTENTS = {
@@ -190,6 +191,9 @@ def generate_response(message: str, session_id: str = "default", user_id=None) -
     if user_id is not None:
         _hydrate_longterm(memory, user_id)
 
+    # FASE 3.2: comandos de memoria tem prioridade
+    memory_command_response = handle_memory_command(clean_message, user_id)
+
     if not clean_message:
         return {
             "response": "Voce nao enviou nenhuma mensagem.",
@@ -214,7 +218,10 @@ def generate_response(message: str, session_id: str = "default", user_id=None) -
             used_llm = True
 
     if not response_text:
-        if intent == INTENT_TOOL_USE:
+        if memory_command_response:
+            response_text = memory_command_response
+
+        elif intent == INTENT_TOOL_USE:
             tool_name = detect_tool(clean_message)
             if tool_name:
                 tool_used = tool_name
@@ -275,6 +282,9 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
     if user_id is not None:
         _hydrate_longterm(memory, user_id)
 
+    # FASE 3.2: comandos de memoria tem prioridade
+    memory_command_response = handle_memory_command(clean_message, user_id)
+
     if not clean_message:
         text = "Voce nao enviou nenhuma mensagem."
         yield {"type": "meta", "intent": "empty", "llm": False, "tool": None, "agents": []}
@@ -314,7 +324,10 @@ def stream_response(message: str, session_id: str = "default", user_id=None):
             full_text = orch_output
 
     if not orchestrated:
-        if intent == INTENT_TOOL_USE:
+        if memory_command_response:
+            full_text = memory_command_response
+
+        elif intent == INTENT_TOOL_USE:
             tool_name = detect_tool(clean_message)
             if tool_name:
                 tool_used = tool_name
