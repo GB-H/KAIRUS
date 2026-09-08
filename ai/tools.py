@@ -1,9 +1,13 @@
 """
 Sistema de ferramentas do KAIRUS.
-FASE 4: web_search real via DuckDuckGo.
+FASE 4.2: web search multi-fonte com fallback
+(ddgs/DuckDuckGo -> Hacker News -> Wikipedia).
 """
 
 import re
+import json
+import urllib.request
+import urllib.parse
 from datetime import datetime
 
 
@@ -189,12 +193,12 @@ def tool_list_tools(message: str) -> str:
 
 
 # =========================
-# WEB SEARCH (FASE 4)
+# WEB SEARCH (FASE 4.2)
 # =========================
 
 @register_tool(
     name="web_search",
-    description="Pesquisa na internet via DuckDuckGo",
+    description="Pesquisa na internet (DuckDuckGo, Hacker News, Wikipedia)",
     keywords=[
         "pesquise", "pesquisar", "procure", "buscar",
         "busca na internet", "web search", "google",
@@ -203,51 +207,116 @@ def tool_list_tools(message: str) -> str:
     ]
 )
 def tool_web_search(message: str) -> str:
-    """Busca na internet via DuckDuckGo (gratis, sem API key).
+    """Busca na internet com fallback entre 3 fontes gratuitas.
 
-    Retorna um resumo dos top N resultados.
-    Se falhar, retorna None (o orchestrator continua sem a tool).
+    DuckDuckGo (ddgs) -> Hacker News -> Wikipedia.
+    Se todas falharem, retorna None (o fluxo continua sem a tool).
     """
-    try:
-        from duckduckgo_search import DDGS
-    except ImportError:
-        return None
-
-    # Extrai o termo de busca
     query = _extract_search_query(message)
     if not query:
         return None
 
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=4))
-    except Exception:
-        return None
+    results = _search_duckduckgo(query)
+    source = "DuckDuckGo"
 
     if not results:
-        return f"Nao encontrei resultados para '{query}'."
+        results = _search_hackernews(query)
+        source = "Hacker News"
 
-    lines = [f"Resultados da pesquisa sobre '{query}':"]
+    if not results:
+        results = _search_wikipedia(query)
+        source = "Wikipedia"
+
+    if not results:
+        return None
+
+    lines = [f"Resultados da pesquisa sobre '{query}' (fonte: {source}):"]
     for r in results:
         title = r.get("title", "Sem titulo")
-        body = r.get("body", "").strip()
+        body = (r.get("body") or "").strip()
         href = r.get("href", "")
+        lines.append(f"- {title}")
         if body:
-            lines.append(f"- {title}: {body}")
-            if href:
-                lines.append(f"  ({href})")
+            lines.append(f"  {body}")
+        if href:
+            lines.append(f"  ({href})")
 
     return "\n".join(lines)
 
 
-def _extract_search_query(message: str) -> str:
-    """Extrai o termo de busca da mensagem.
+def _search_duckduckgo(query: str):
+    """Fonte 1: DuckDuckGo via pacote ddgs."""
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        return None
 
-    Exemplos:
-      "pesquise as ultimas noticias sobre IA" -> "ultimas noticias sobre IA"
-      "pesquise sobre buraco negro" -> "buraco negro"
-      "busca na internet python" -> "python"
-    """
+    try:
+        with DDGS() as ddgs:
+            return list(ddgs.text(query, max_results=4)) or None
+    except Exception:
+        return None
+
+
+def _search_hackernews(query: str):
+    """Fonte 2: Hacker News via Algolia (funciona em qualquer IP)."""
+    try:
+        url = (
+            "https://hn.algolia.com/api/v1/search?query="
+            + urllib.parse.quote(query)
+            + "&hitsPerPage=4"
+        )
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "KAIRUS/0.6"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        out = []
+        for hit in data.get("hits", []):
+            title = hit.get("title") or hit.get("story_title") or ""
+            if not title:
+                continue
+            href = hit.get("url") or (
+                "https://news.ycombinator.com/item?id="
+                + str(hit.get("objectID"))
+            )
+            body = f"{hit.get('points', 0)} points | autor: {hit.get('author', '?')}"
+            out.append({"title": title, "body": body, "href": href})
+        return out or None
+    except Exception:
+        return None
+
+
+def _search_wikipedia(query: str):
+    """Fonte 3: Wikipedia pt (API oficial, sem key)."""
+    try:
+        url = (
+            "https://pt.wikipedia.org/w/api.php"
+            "?action=query&list=search&format=json&srslimit=3&srsearch="
+            + urllib.parse.quote(query)
+        )
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "KAIRUS/0.6"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        out = []
+        for item in data.get("query", {}).get("search", []):
+            title = item.get("title", "")
+            snippet = re.sub(r"<[^>]+>", "", item.get("snippet", ""))
+            href = "https://pt.wikipedia.org/wiki/" + urllib.parse.quote(
+                title.replace(" ", "_")
+            )
+            out.append({"title": title, "body": snippet, "href": href})
+        return out or None
+    except Exception:
+        return None
+
+
+def _extract_search_query(message: str) -> str:
+    """Extrai o termo de busca da mensagem."""
     m = message.lower().strip()
 
     prefixes = [
@@ -265,7 +334,6 @@ def _extract_search_query(message: str) -> str:
             if term:
                 return term
 
-    # Fallback: usa a mensagem inteira se for curta
     if len(message) < 80:
         return message.strip()
 
